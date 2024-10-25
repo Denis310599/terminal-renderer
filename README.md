@@ -5,6 +5,9 @@ Currently it only supports CPU rendering and simple scenes, but the idea is to b
 
 These are some captures of what I have achived so far :D
 
-![Eevee](./images/eevee.png "Eeeve (400 Polygons at 60 fps)")
+400 Polygons at 60 fps
+![Eevee](./images/eevee.png "Eeeve")
 
-![Teapot](./images/teapot.png "Teapot ( ~90 000 Polygons at 2 fps)")
+~90 000 Polygons at 2 fps
+![Teapot](./images/teapot.png "Teapot")
+
