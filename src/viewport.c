@@ -7,8 +7,10 @@
 #include <time.h>
 
 void postProcessFrameToChar(char * buffer, Pixel * frameBuffer);
-void printFrameGP();
+void printFrameGP(Pixel * buffer);
 void importStl(char * path, Vector3d scale, Vector3d pos);
+char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen);
+
 
 int main(){
 	//return 0;
@@ -17,7 +19,7 @@ int main(){
 	printf("Starting...\n");
 	initRenderer();
 	SCREEN_WIDTH=400;
-	SCREEN_HEIGHT=100;
+	SCREEN_HEIGHT=200;
 
 	//Define the objects
 	importStl("../assets/eevee2.stl", (Vector3d){1, 1, 1}, (Vector3d){47, 214, 0});
@@ -89,10 +91,11 @@ int main(){
 		//Render the frame
 		renderFrame(frameBuffer);
 		//printFrameGP(frameBuffer);
+		//return 0;
 		//Post processing of a frame
 		//postProcessFrameToChar(output, frameBuffer);
 		//char* tablaPixeles = " .`'-~+:;<tfjrxnuvczmwqpdbkhao#MW&8%B@$";
-		char* tablaPixeles = " .`-':;+<tfxvcznumwpbkhj#WW8B$";
+		/*char* tablaPixeles = " .`-':;+<tfxvcznumwpbkhj#WW8B$";
 		//char* tablaPixeles = "`.-':;~+<rnuvwpd#W8$";
 		//char* tablaPixeles = "`.-':;+<rnuvwpd#W8$";
 		int longitudTablaPixeles = strlen(tablaPixeles);
@@ -122,7 +125,7 @@ int main(){
 			}
 			output[((SCREEN_WIDTH+1)*y)-1] = '\n';
 		}
-		output[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT)] = '\0';
+		output[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT)] = '\0';*/
 		
 		//Calculate metrics
 		tNew = clock();
@@ -132,7 +135,8 @@ int main(){
 		//Print the frame
 		printf("%2f FPS\n", fps);
 		printf("%f dt\n", dt);
-		printf("%s\n", output);
+		//printf("%s\n", output);
+		printFrameGP(frameBuffer);
 		tOld = tNew;
 	}
 }
@@ -254,13 +258,99 @@ void importStl(char * path, Vector3d scale, Vector3d pos){
 }
 
 
-void printFrameGP(){
+void printFrameGP(Pixel * buffer){
 	//Create the header
-	char baseMsg[] = "\033_Gf=%d,s=%d,v%d;%s\033\\";
-	char pixelData[27] = {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255};
-	//char output[2000];
-	
-	//printf(baseMsg, 24, 3, 3, pixelData);
-	printf("\033_Gf=%d,s=%d,v%d;%s\033\\", 24, 3, 3, pixelData);
+	char baseMsg[] = "\033_Gf=%d,s=%d,v=%d;%s\033\\";
+	int pixelCount = SCREEN_WIDTH*SCREEN_HEIGHT;
+	unsigned char * pixelData = malloc(sizeof(unsigned char)*pixelCount*3);
+	size_t output_length;
+	char * payload; 
+	size_t payloadToRead = 0;
+	//char output[2000]
+	int m = 1;
+	int offset = 0;
 
+
+
+	//Creates the pixel data
+	for(int pixel_index = 0; pixel_index<pixelCount; pixel_index++){
+		pixelData[pixel_index*3] = (char) buffer[pixel_index].r;
+		pixelData[pixel_index*3+1] = (char) buffer[pixel_index].r;
+		pixelData[pixel_index*3+2] = (char) buffer[pixel_index].r;
+	}
+	payload = base64_encode(pixelData, pixelCount*3, &output_length);
+		m = (output_length>4096)? 1 : 0;
+	//printf("Payload: %s\n", payload);
+	//printf("Output length: %d\n", output_length);
+	printf("\033_Ga=T,i=1,m=%d,f=24,s=%d,v=%d;\033\\", m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	while(m==1){
+		m = (output_length>4096)? 1 : 0;
+		payloadToRead= (output_length>4096)?4096:output_length;
+		//printf("Offset: %d\n", offset);
+		//printf("Output Length left: %d\n", output_length);
+		//printf("_Gm=%d;%.*s\n", m, (int) payloadToRead, payload + offset);
+		printf("\033_Gm=%d;%.*s\033\\", m, (int) payloadToRead, payload + offset);
+		fflush(stdout);
+		//printf("_Ga=T,m=%d,f=32,s=%d,v=%d;%.*s\n", m, SCREEN_WIDTH, SCREEN_HEIGHT, (int) payloadToRead,payload+offset);
+		//printf("\033_Ga=T,i=1,m=%d,f=32,s=%d,v=%d;%.*s\033\\", m, SCREEN_WIDTH, SCREEN_HEIGHT, (int) payloadToRead,payload+offset);
+		offset +=payloadToRead;
+		output_length-=payloadToRead;
+		//printf("%d\n",cont);
+	}
+	//printf(baseMsg, 24, 3, 3, pixelData);
+	//printf("\e_Ga=T,f=%d,s=%d,v=%d;%s\e\\", 24, SCREEN_HEIGHT, SCREEN_WIDTH, pixelData);
+
+}
+static const unsigned char base64_table[65] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+* base64_encode - Base64 encode
+* @src: Data to be encoded
+* @len: Length of the data to be encoded
+* @out_len: Pointer to output length variable, or %NULL if not used
+* Returns: Allocated buffer of out_len bytes of encoded data,
+* or empty string on failure
+*/
+char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen)
+{
+    unsigned char *out, *pos;
+    const unsigned char *end, *in;
+
+    size_t olen;
+
+    olen = 4*((len + 2) / 3); /* 3-byte blocks to 4-byte */
+
+    if (olen < len)
+        return NULL; /* integer overflow */
+		*outputLen = olen;
+    char * outStr = malloc(sizeof(char)*olen);
+    out = (unsigned char*)&outStr[0];
+
+    end = src + len;
+    in = src;
+    pos = out;
+    while (end - in >= 3) {
+        *pos++ = base64_table[in[0] >> 2];
+        *pos++ = base64_table[((in[0] & 0x03) << 4) | (in[1] >> 4)];
+        *pos++ = base64_table[((in[1] & 0x0f) << 2) | (in[2] >> 6)];
+        *pos++ = base64_table[in[2] & 0x3f];
+        in += 3;
+    }
+
+    if (end - in) {
+        *pos++ = base64_table[in[0] >> 2];
+        if (end - in == 1) {
+            *pos++ = base64_table[(in[0] & 0x03) << 4];
+            *pos++ = '=';
+        }
+        else {
+            *pos++ = base64_table[((in[0] & 0x03) << 4) |
+                (in[1] >> 4)];
+            *pos++ = base64_table[(in[1] & 0x0f) << 2];
+        }
+        *pos++ = '=';
+    }
+
+    return outStr;
 }
