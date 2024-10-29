@@ -5,7 +5,7 @@ Currently it only supports CPU rendering and simple scenes, but the idea is to b
 
 These are some captures of what I have achived so far :D
 
-First proper image.
+First propper image.
 ![TeapotHD](./images/teapotHD.png "TeapotHD")
 
 400 Polygons at 60 fps
