@@ -5,7 +5,7 @@ CFLAGS=-I$(IDIR) -Wall -g -std=c11 -O3
 ODIR=../obj
 LDIR =../lib
 
-LIBS=-lm
+LIBS=-lm -lpng
 
 _DEPS = renderer.h
 DEPS = $(patsubst %,$(IDIR)/%,$(_DEPS))

@@ -13,7 +13,6 @@ void printFrameGP(Pixel * buffer);
 void importStl(char * path, Vector3d scale, Vector3d pos);
 char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen);
 
-int FRAME_BUFFER_INDEX = 0;
 
 int main(){
 	//return 0;
@@ -21,12 +20,11 @@ int main(){
 	//Set up the renderer
 	printf("Starting...\n");
 	initRenderer();
-	SCREEN_WIDTH=1280;
-	SCREEN_HEIGHT=720;
+	SCREEN_WIDTH=800;
+	SCREEN_HEIGHT=400;
 
 	//Define the objects
-	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 0, 0});
-	//importStl("../assets/eevee2.stl", (Vector3d){0.1, 0.1, 0.1}, (Vector3d){8, 0, 0});
+	//importStl("../assets/eevee2.stl", (Vector3d){1, 1, 1}, (Vector3d){47, 214, 0});
 	//return 0;
 
 	Object cubeObj;
@@ -39,12 +37,12 @@ int main(){
 	Plane myPlane = {(Vector3d){0, 0, 0}, (Vector3d){0, 0, 1}};
 	planeObj.plano = myPlane;
 	addObject(planeObj);
-	//addObject(cubeObj);
-	myCube.pos = (Vector3d){0, 0, 0};
-	myCube.escala = (Vector3d){0.5, 0.5, 0.5};
+	addObject(cubeObj);
+	myCube.pos = (Vector3d){2, -2, 1};
+	myCube.escala = (Vector3d){1, 1, 1};
 	myCube.rotacion = (Vector3d){0, 0, 0};
 	cubeObj.cubo = myCube;
-	//addObject(cubeObj);
+	addObject(cubeObj);
 
 	//Define the lights
 	Light light;
@@ -67,7 +65,7 @@ int main(){
 	Camera myCam;
 	//myCam.pos = (Vector3d){15, 0, 8};
 	//myCam.pos = (Vector3d){70, 0, 50};
-	myCam.pos = (Vector3d){5, 0, 3.5};
+	myCam.pos = (Vector3d){5, 0, 2};
 	myCam.dir = (Vector3d){-5, 0, -5};
 	myCam.fov = 90;
 	
@@ -75,8 +73,8 @@ int main(){
 	FAST_LIGHT=0;
 
 	//Define the frame buffer
-	Pixel * frameBuffer = malloc(SCREEN_WIDTH*SCREEN_HEIGHT*sizeof(Pixel));//[SCREEN_WIDTH*SCREEN_HEIGHT];
-  char * output = malloc(sizeof(char)*(((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10));//;[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10];
+	Pixel frameBuffer[SCREEN_WIDTH*SCREEN_HEIGHT];
+  char output[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10];
 
 	//Time metrics
 	clock_t tOld = clock();
@@ -88,16 +86,14 @@ int main(){
 	Quaternion cameraRotationQuaternion;
 	double angularSpeed = deg2rad(360)/10;
 	renderFrame(frameBuffer);
-	
-	printf("\033[2J");
 	while(1){
 		//Calculate position of the objects in the scene (in this case the camera)
 		cameraRotationQuaternion = newQuat((Vector3d) {0, 0, 1}, angularSpeed * dt);
 		ACTIVE_CAMERA.pos = vect_rot(ACTIVE_CAMERA.pos, cameraRotationQuaternion);
-		ACTIVE_CAMERA.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, ACTIVE_CAMERA.pos, -1));
-		//printf("Active Dir: x %f y %f z %f\n", ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z);
+		ACTIVE_CAMERA.dir = normalizeVector(vect_sum((Vector3d){0, 0, 0}, ACTIVE_CAMERA.pos, -1));
+		printf("Active Dir: x %f y %f z %f\n", ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z);
 		//Render the frame
-		renderFrame(frameBuffer);
+		//renderFrame(frameBuffer);
 		printFrameGP(frameBuffer);
 		//return 0;
 		//Post processing of a frame
@@ -269,9 +265,8 @@ void importStl(char * path, Vector3d scale, Vector3d pos){
 
 void printFrameGP(Pixel * buffer){
 	//Create the header
-	char headerMsg[] = "\033_Ga=T,i=1,m=%d,x=1234,y=1234,c=1,f=24,s=12345,v=12345,q=1;\033\\";
-	char headerMsg2[] = "\033_Gm=12345;\033\\";
-	long int pixelCount = SCREEN_WIDTH*SCREEN_HEIGHT;
+	char baseMsg[] = "\033_Gf=%d,s=%d,v=%d;%s\033\\";
+	int pixelCount = SCREEN_WIDTH*SCREEN_HEIGHT;
 	unsigned char * pixelData = malloc(sizeof(unsigned char)*pixelCount*3);
 	size_t output_length;
 	char * payload; 
@@ -279,8 +274,7 @@ void printFrameGP(Pixel * buffer){
 	//char output[2000]
 	int m = 1;
 	int offset = 0;
-	unsigned char *printBuffer = malloc((strlen(headerMsg) + strlen(headerMsg2)*(1+(pixelCount*4/4096))+pixelCount*4)*sizeof(char));
-	unsigned char *auxBuffer = malloc(5100 * sizeof(char)); 
+
 	//PNG Stuff
 	/*png_structp png_ptr = NULL;
 	png_infop info_ptr = NULL;
@@ -337,7 +331,7 @@ void printFrameGP(Pixel * buffer){
 
 
 	//Creates the pixel data
-	for(long int pixel_index = 0; pixel_index<pixelCount; pixel_index++){
+	for(int pixel_index = 0; pixel_index<pixelCount; pixel_index++){
 		pixelData[pixel_index*3] = (unsigned char) buffer[pixel_index].r;
 		pixelData[pixel_index*3+1] = (unsigned char) buffer[pixel_index].r;
 		pixelData[pixel_index*3+2] = (unsigned char) buffer[pixel_index].r;
@@ -359,50 +353,31 @@ void printFrameGP(Pixel * buffer){
 	//printf("\033_Ga=T,t=f,i=2,f=100,q=1;%.*s\033\\", (int) output_length, payload);
 	
 	//fflush(stdout);
-	//free(pixelData);
+	free(pixelData);
 	
 	payload = base64_encode(pixelData, pixelCount*3, &output_length);
 	m = (output_length>4096)? 1 : 0;
 	//printf("Payload: %s\n", payload);
 	//printf("Output length: %d\n", output_length);
 	//printf("\033[2J");
-	//printf("\033_Ga=T,i=1,m=%d,f=24,s=%d,v=%d,q=1;\033\\", m, SCREEN_WIDTH, SCREEN_HEIGHT);
-	//printf("%ld\n", output_length);
-	FRAME_BUFFER_INDEX = !FRAME_BUFFER_INDEX;
-	printf("\x1b[%d;%dH", 10, 20);
-	sprintf((char *) printBuffer, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	printf("\033_Ga=T,i=1,m=%d,f=24,s=%d,v=%d,q=1;\033\\", m, SCREEN_WIDTH, SCREEN_HEIGHT);
 	while(m==1){
 		m = (output_length>4096)? 1 : 0;
 		payloadToRead= (output_length>4096)?4096:output_length;
 		//printf("Offset: %d\n", offset);
 		//printf("Output Length left: %d\n", output_length);
 		//printf("_Gm=%d;%.*s\n", m, (int) payloadToRead, payload + offset);
-		//printf("a");
-		//printf("\033_Gm=%d;%.*s\033\\", m, (int) payloadToRead, payload + offset);
-		sprintf((char *) auxBuffer,"\033_Gm=%d;%.*s\033\\",m, (int) payloadToRead, payload+offset);
-		strncat((char *) printBuffer, (char *) auxBuffer, strlen((char *)auxBuffer));
+
+		printf("\033_Gm=%d;%.*s\033\\\n", m, (int) payloadToRead, payload + offset);
 		//fflush(stdout);
 		//printf("_Ga=T,m=%d,f=32,s=%d,v=%d;%.*s\n", m, SCREEN_WIDTH, SCREEN_HEIGHT, (int) payloadToRead,payload+offset);
 		//printf("\033_Ga=T,i=1,m=%d,f=32,s=%d,v=%d;%.*s\033\\", m, SCREEN_WIDTH, SCREEN_HEIGHT, (int) payloadToRead,payload+offset);
 		offset +=payloadToRead;
 		output_length-=payloadToRead;
-		//printf("%d\n",(int) output_length);
-		//printf("%d\n", offset);
-		//printf("%d\n", payloadToRead);
+		//printf("%d\n",cont);
 	}
 
-	printf("%s", printBuffer);
-	//printf("\033_Ga=p,i=%d,c=40,r=10\033\\", FRAME_BUFFER_INDEX+1);
 	fflush(stdout);
-	printf("\033_Ga=d,d=i,i=%d\033\\",!FRAME_BUFFER_INDEX+1);
-	fflush(stdout);
-	printf("\x1b[%d;%dH", 8, 20);
-	//printf("a");
-	//free(pixelData);
-	//free(printBuffer);
-	//free(auxBuffer);
-	//printf("a");
-	//fflush(stdout);
 	//printf(baseMsg, 24, 3, 3, pixelData);
 	//printf("\e_Ga=T,f=%d,s=%d,v=%d;%s\e\\", 24, SCREEN_HEIGHT, SCREEN_WIDTH, pixelData);
 

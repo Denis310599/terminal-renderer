@@ -117,7 +117,7 @@ void renderFrame(Pixel * frameBuffer){
 		debug("Rendering with CPU");
 		//Render in CPU mode
 		//PreProcess the polygons (Pseudo Fragment Shader)
-		ObjectListNode * bufferObjectPixel [SCREEN_WIDTH * SCREEN_HEIGHT];
+		ObjectListNode ** bufferObjectPixel = malloc(sizeof(ObjectListNode*)*SCREEN_HEIGHT*SCREEN_WIDTH);// [SCREEN_WIDTH * SCREEN_HEIGHT];
 		ObjectListNode * commonObjectsBuffer = preProcessObjectPixelBuffer(bufferObjectPixel);
 		//getchar();
 		//Process every single Pixel
@@ -132,6 +132,13 @@ void renderFrame(Pixel * frameBuffer){
 				}
 			}
 		}
+		for(int i = 0; i<(SCREEN_WIDTH * SCREEN_HEIGHT); i++){
+			if(bufferObjectPixel[i] != NULL){
+				freeList(bufferObjectPixel[i]);
+			}
+			bufferObjectPixel[i] = NULL;
+		}
+		free(bufferObjectPixel);
 	}
 }
 
@@ -462,7 +469,7 @@ int calculaLuminosidadPixel(int x, int y, struct Camara cam, ObjectListNode ** b
 	//Si no hay punto de colision no hace falta calcular el resto
 	
 	if(isnan(puntoColision.x)){
-		return -1;
+		return 0;
 	}
 	//Calcula la normal al plano que pasa por ese punto
 	struct Vector3d normalSuperficie = getNormalPunto(puntoColision, objetoColisionado);
