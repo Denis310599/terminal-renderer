@@ -8,7 +8,7 @@
 
 #include "../lib/lpng1644/png.h"
 
-void postProcessFrameToChar(char * buffer, Pixel * frameBuffer);
+void postProcessFrameToChar(Pixel * frameBuffer, char * output);
 void printFrameGP(Pixel * buffer);
 void importStl(char * path, Vector3d scale, Vector3d pos);
 char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen);
@@ -21,8 +21,9 @@ int main(){
 	//Set up the renderer
 	printf("Starting...\n");
 	initRenderer();
-	SCREEN_WIDTH=1280;
-	SCREEN_HEIGHT=720;
+	SCREEN_WIDTH=400;
+	SCREEN_HEIGHT=100;
+	PIXEL_RESOL = 1;
 
 	//Define the objects
 	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 0, 0});
@@ -51,15 +52,15 @@ int main(){
 	light.tipo = point;
 	light.pos = (Vector3d){0, 60, 60};
 	light.shadow = 0;
-	light.intensidad=20;
+	light.intensidad=40;
 	addLight(light);
 	light.tipo = point;
 	light.pos = (Vector3d){25, -25, 30};
 	light.shadow = 0;
-	light.intensidad=20;
+	light.intensidad=30;
 	addLight(light);
 	light.pos = (Vector3d){-25, -30, 30};
-	light.intensidad=10;
+	light.intensidad=20;
 	addLight(light);
 
 
@@ -87,7 +88,7 @@ int main(){
 	//Animation items
 	Quaternion cameraRotationQuaternion;
 	double angularSpeed = deg2rad(360)/10;
-	renderFrame(frameBuffer);
+	//renderFrame(frameBuffer);
 	
 	printf("\033[2J");
 	while(1){
@@ -99,61 +100,28 @@ int main(){
 		//Render the frame
 		renderFrame(frameBuffer);
 		printFrameGP(frameBuffer);
-		//return 0;
-		//Post processing of a frame
-		//postProcessFrameToChar(output, frameBuffer);
-		//char* tablaPixeles = " .`'-~+:;<tfjrxnuvczmwqpdbkhao#MW&8%B@$";
-		/*char* tablaPixeles = " .`-':;+<tfxvcznumwpbkhj#WW8B$";
-		//char* tablaPixeles = "`.-':;~+<rnuvwpd#W8$";
-		//char* tablaPixeles = "`.-':;+<rnuvwpd#W8$";
-		int longitudTablaPixeles = strlen(tablaPixeles);
-		
-		for (int y = 0; y < SCREEN_HEIGHT; y++) {
-			for (int x = 0; x < SCREEN_WIDTH; x++) {
-				// Indice del array
-				char pixel;
-				int i = (SCREEN_WIDTH) * y + x;
-				int indice = (SCREEN_WIDTH +1)*y +x;
-				int intensidad = frameBuffer[i].r;
-				int indicePixel = intensidad *  longitudTablaPixeles / 256;
-				//printf("PostProcesando pixel x: %d, y: %d\n", x, y);	
-				//printf("Intensidad: %d, IndicePixel: %d\n", intensidad, indicePixel);
-				if (intensidad == -1) {
-					pixel = ' ';
-				} else {
-					pixel = indicePixel <= (longitudTablaPixeles - 1)
-									? tablaPixeles[indicePixel]
-									: tablaPixeles[longitudTablaPixeles - 1];
-				}
-					output[indice] = pixel;
-					//printf("Caracter puesto: %c\n", pixel);
-					//printf("Caracter puesto: %c\n", output[indice]);
-					//printf("%s\n", output);
-
-			}
-			output[((SCREEN_WIDTH+1)*y)-1] = '\n';
-		}
-		output[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT)] = '\0';*/
+		postProcessFrameToChar(frameBuffer,output);
+		printf("%s\n", output);
 		
 		//Calculate metrics
 		//printf("\033[2J");
 		printf("%2f FPS\n", fps);
 		tNew = clock();
 		dt = ((double)(tNew-tOld))/CLOCKS_PER_SEC;
-		fps = (double)1 /dt;
-
-		//Print the frame
-		//printf("%f dt\n", dt);
-		//printf("%s\n", output);
-		//printFrameGP(frameBuffer);
+		fps = (double)1.0 /dt;
 		tOld = tNew;
 	}
 }
 
-void postProcessFrameToChar(char * output, Pixel * frameBuffer){
+
+void postProcessFrameToChar(Pixel * frameBuffer, char * output){
+	//char* tablaPixeles = " .`'-~+:;<tfjrxnuvczmwqpdbkhao#MW&8%B@$";
+	//char* tablaPixeles = " .`-':;+<tfxvcznumwpbkhj#WW8B$";
+	//char* tablaPixeles = "`.-':;~+<rnuvwpd#W8$";
+	//char* tablaPixeles = "`.-':;+<rnuvwpd#W8$";
+
 	char* tablaPixeles = " .`'-~+:;<tfjrxnuvczmwqpdbkhao#MW&8%B@$";
 	int longitudTablaPixeles = strlen(tablaPixeles);
-	
 	for (int y = 0; y < SCREEN_HEIGHT; y++) {
 	  for (int x = 0; x < SCREEN_WIDTH; x++) {
 			// Indice del array
@@ -281,60 +249,6 @@ void printFrameGP(Pixel * buffer){
 	int offset = 0;
 	unsigned char *printBuffer = malloc((strlen(headerMsg) + strlen(headerMsg2)*(1+(pixelCount*4/4096))+pixelCount*4)*sizeof(char));
 	unsigned char *auxBuffer = malloc(5100 * sizeof(char)); 
-	//PNG Stuff
-	/*png_structp png_ptr = NULL;
-	png_infop info_ptr = NULL;
-	png_byte ** row_pointers = NULL;
-	
-	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-	info_ptr = png_create_info_struct(png_ptr);
-	
-	if(!png_ptr || !info_ptr){
-		return;
-	}
-
-	png_set_IHDR(png_ptr,
-							info_ptr,
-							SCREEN_WIDTH,
-							SCREEN_HEIGHT,
-							8,
-							PNG_COLOR_TYPE_RGB,
-							PNG_INTERLACE_NONE,
-							PNG_COMPRESSION_TYPE_DEFAULT,
-							PNG_FILTER_TYPE_DEFAULT);
-	
-	FILE *fp = fopen("/tmp/frame.png", "wb");
-  if (!fp) {
-      perror("Failed to open file for writing");
-      //free(pixelData);
-      return;
-  }
-  
-
-	//Write the data in png format
-	row_pointers = png_malloc(png_ptr, SCREEN_HEIGHT*sizeof(png_byte *));
-	for(int y = 0; y<SCREEN_HEIGHT; y++){
-		png_byte *row = png_malloc(png_ptr, sizeof(unsigned char) * SCREEN_WIDTH*pixelCount);
-		row_pointers[y] = row;
-		for(int x=0; x<SCREEN_WIDTH; x++){
-			*row++ =buffer[(SCREEN_WIDTH*y)+x].r;
-			*row++ =buffer[(SCREEN_WIDTH*y)+x].g;
-			*row++ =buffer[(SCREEN_WIDTH*y)+x].b;
-		}
-	}
-
-	png_init_io(png_ptr, fp);
-	png_set_rows(png_ptr, info_ptr,row_pointers);
-	png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
-
-	for(int y = 0; y<SCREEN_HEIGHT; y++){
-		png_free(png_ptr, row_pointers[y]);
-	}
-	png_free(png_ptr, row_pointers);
-	fclose(fp);
-	*/
-	
-
 
 	//Creates the pixel data
 	for(long int pixel_index = 0; pixel_index<pixelCount; pixel_index++){
@@ -343,71 +257,29 @@ void printFrameGP(Pixel * buffer){
 		pixelData[pixel_index*3+2] = (unsigned char) buffer[pixel_index].r;
 	}
 
-	// Write the image data to a temporary file
-  /*FILE *fp = fopen("/tmp/frame.rgb", "wb");
-  if (!fp) {
-      perror("Failed to open file for writing");
-      free(pixelData);
-      return;
-  }
-  //fwrite(pixelData, 1, SCREEN_WIDTH* SCREEN_HEIGHT * 3, fp);
-
-	fclose(fp);*/
-
-	//char * dir = "/tmp/frame.png";
-	//payload = base64_encode(dir, strlen(dir), &output_length);
-	//printf("\033_Ga=T,t=f,i=2,f=100,q=1;%.*s\033\\", (int) output_length, payload);
-	
-	//fflush(stdout);
-	//free(pixelData);
-	
+	//Creates the protocol message to be printed that kitty protocol understands.
 	payload = base64_encode(pixelData, pixelCount*3, &output_length);
 	m = (output_length>4096)? 1 : 0;
-	//printf("Payload: %s\n", payload);
-	//printf("Output length: %d\n", output_length);
-	//printf("\033[2J");
-	//printf("\033_Ga=T,i=1,m=%d,f=24,s=%d,v=%d,q=1;\033\\", m, SCREEN_WIDTH, SCREEN_HEIGHT);
-	//printf("%ld\n", output_length);
 	FRAME_BUFFER_INDEX = !FRAME_BUFFER_INDEX;
 	printf("\x1b[%d;%dH", 10, 20);
 	sprintf((char *) printBuffer, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
 	while(m==1){
 		m = (output_length>4096)? 1 : 0;
 		payloadToRead= (output_length>4096)?4096:output_length;
-		//printf("Offset: %d\n", offset);
-		//printf("Output Length left: %d\n", output_length);
-		//printf("_Gm=%d;%.*s\n", m, (int) payloadToRead, payload + offset);
-		//printf("a");
-		//printf("\033_Gm=%d;%.*s\033\\", m, (int) payloadToRead, payload + offset);
 		sprintf((char *) auxBuffer,"\033_Gm=%d;%.*s\033\\",m, (int) payloadToRead, payload+offset);
 		strncat((char *) printBuffer, (char *) auxBuffer, strlen((char *)auxBuffer));
-		//fflush(stdout);
-		//printf("_Ga=T,m=%d,f=32,s=%d,v=%d;%.*s\n", m, SCREEN_WIDTH, SCREEN_HEIGHT, (int) payloadToRead,payload+offset);
-		//printf("\033_Ga=T,i=1,m=%d,f=32,s=%d,v=%d;%.*s\033\\", m, SCREEN_WIDTH, SCREEN_HEIGHT, (int) payloadToRead,payload+offset);
 		offset +=payloadToRead;
 		output_length-=payloadToRead;
-		//printf("%d\n",(int) output_length);
-		//printf("%d\n", offset);
-		//printf("%d\n", payloadToRead);
 	}
 
+	//Prints the actual message
 	printf("%s", printBuffer);
-	//printf("\033_Ga=p,i=%d,c=40,r=10\033\\", FRAME_BUFFER_INDEX+1);
 	fflush(stdout);
 	printf("\033_Ga=d,d=i,i=%d\033\\",!FRAME_BUFFER_INDEX+1);
 	fflush(stdout);
 	printf("\x1b[%d;%dH", 8, 20);
-	//printf("a");
-	//free(pixelData);
-	//free(printBuffer);
-	//free(auxBuffer);
-	//printf("a");
-	//fflush(stdout);
-	//printf(baseMsg, 24, 3, 3, pixelData);
-	//printf("\e_Ga=T,f=%d,s=%d,v=%d;%s\e\\", 24, SCREEN_HEIGHT, SCREEN_WIDTH, pixelData);
-
-
 }
+
 static const unsigned char base64_table[65] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

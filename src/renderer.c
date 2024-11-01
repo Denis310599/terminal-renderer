@@ -18,6 +18,7 @@
 	Camera ACTIVE_CAMERA = (Camera){};
 	double FPS = 0;
 	double DELTA_TIME = 0;
+	double PIXEL_RESOL = 2;
 //Funcion que dibuja el borde en el mapa que se le pasa como parametro
 int dibujaBorde(int x, int y, int indice, char* mapa);
 
@@ -429,7 +430,7 @@ int calculaLuminosidadPixel(int x, int y, struct Camara cam, ObjectListNode ** b
 	//Obten el rayo en coordenadas locales
 	//double anchoReal = 2.0*sin(deg2rad((double)cam.fov)/2.0);
 	double anchoReal = 2.0*tan(deg2rad(cam.fov/2.0))*FRONT_CLIP;
-	double altoReal = (anchoReal*/*2**/SCREEN_HEIGHT)/SCREEN_WIDTH;//El *2 es por el aspect ratio de los pixeles (1:2)
+	double altoReal = (anchoReal*PIXEL_RESOL*SCREEN_HEIGHT)/SCREEN_WIDTH;//El *2 es por el aspect ratio de los pixeles (1:2)
 	
 	debug("Ancho Real: %f, Alto Real: %f, Fov: %f", anchoReal, altoReal, deg2rad(cam.fov));
 	//La camara apunta hacia y, y el plano de pixeles es perpendicular al plano y,x.
@@ -860,7 +861,7 @@ void preProcessPolygon(ObjectListNode ** buffer, struct Poligono polygon){
 
 	//double anchoReal = 2.0*sin(deg2rad((double)myCam.fov)/2.0);
 	double anchoReal = 2.0*tan(deg2rad(ACTIVE_CAMERA.fov/2.0))*FRONT_CLIP;
-	double altoReal = (anchoReal*/*2**/SCREEN_HEIGHT)/SCREEN_WIDTH;//El *2 es por el aspect ratio de los pixeles (1:2)
+	double altoReal = (anchoReal*PIXEL_RESOL*SCREEN_HEIGHT)/SCREEN_WIDTH;//El *2 es por el aspect ratio de los pixeles (1:2)
 	int xMin = trunc((xBoundBoxMin + anchoReal/2.0) * SCREEN_WIDTH / anchoReal);
 	int xMax = trunc((xBoundBoxMax + anchoReal/2.0) * SCREEN_WIDTH / anchoReal);
 	xMin = xMin < 0 ? 0 : xMin;
