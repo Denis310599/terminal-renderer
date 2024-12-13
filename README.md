@@ -5,6 +5,9 @@ Currently it only supports CPU rendering and simple scenes, but the idea is to b
 
 These are some captures of what I have achived so far :D
 
+~90 000 Polygons at ~60 fps
+![Teapot](./images/teapot-gpu.png "Teapot")
+
 First propper image.
 ![TeapotHD](./images/teapotHD.png "TeapotHD")
 
