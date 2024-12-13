@@ -1,3 +1,4 @@
+#include <GLFW/glfw3.h>
 #ifndef RENDERER
 
 //################ Math Types #################
@@ -104,11 +105,13 @@ extern Camera ACTIVE_CAMERA;
 extern double UMBRAL_LUZ;
 extern int COLOR_MODE;
 extern int DEBUG;
-
+extern double PIXEL_RESOL; 
 
 //Method definitions
 void renderFrame(Pixel * frameBuffer);
+void calculateFrameGPU(unsigned char * pixelData);
 void initRenderer();
+GLFWwindow * setUpOpenGL();
 
 int addLight(Light light);
 int getLight(int id, Light * light);
@@ -124,6 +127,7 @@ int deleteObject(int id);
 
 Polygon newPolygon(Vector3d p1, Vector3d p2, Vector3d p3, Vector3d normal);
 Mesh * newMesh(Polygon * polygonArray, int m_polygon, Vector3d scale, Vector3d position);
+
 
 //Math operations
 

@@ -1,3 +1,7 @@
+#include "./include/glad/glad.h"
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include <GLFW/glfw3.h>
 #include <stdlib.h>
 #include <float.h>
 #include <stdarg.h>
@@ -7,6 +11,7 @@
 #include <unistd.h>
 #include <string.h>
 #include "../include/renderer.h"
+#include "../include/cglm/cglm.h"
 
 	int SCREEN_WIDTH = 200;
 	int SCREEN_HEIGHT = 50;
@@ -84,6 +89,11 @@ void lightListPushFirst(LightListNode ** head, Light data);
 void freeList(ObjectListNode * head);
 void freeLightList(LightListNode * head);
 
+//GPU Rendering-related Functions
+unsigned int setUpFragmentShader(char * path);
+void checkCompileShaderErrors(unsigned int shader, char *type);
+unsigned int setUpShader(char * pathToFragment, char * pathToVertex);
+int loadModelGPU(Object * modelToLoad);
 //We configure the renderer via its global variables.
 //DELTA_TIME
 //
@@ -102,6 +112,11 @@ void freeLightList(LightListNode * head);
 //********************************************************
 ObjectListNode * listaObjetos = NULL;
 LightListNode * listaLuces = NULL;
+
+GLFWwindow * window = NULL;
+unsigned int shaderProgram;
+unsigned int VAO;
+int vertexCount = 0;
 
 //********************************************************
 //************* Public accessible functions
@@ -140,6 +155,8 @@ void renderFrame(Pixel * frameBuffer){
 			bufferObjectPixel[i] = NULL;
 		}
 		free(bufferObjectPixel);
+	}else{
+		debug("Rendering with GPU");
 	}
 }
 
@@ -149,12 +166,321 @@ void initRenderer(){
 	debug("Initialazing renderer...");
 	SCREEN_WIDTH = 200;
 	SCREEN_HEIGHT = 50;
-	GPU_MODE = 0;
 	FAST_LIGHT = 0;
 	FRONT_CLIP = 0.1;
 	UMBRAL_LUZ = 0.1;
 	COLOR_MODE = 0;
 }
+
+//********************************************************
+//************* OpenGL Functions ++++++++++++++++++++
+//********************************************************
+
+
+
+//Function that setsup the GPU renderer
+GLFWwindow * setUpOpenGL(){
+	debug("Setting Up OpenGL");
+	glfwInit();
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
+	window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Terminal-Renderer", NULL, NULL);
+	if (window == NULL)
+	{
+			printf("Failed to create GLFW window");
+			glfwTerminate();
+			return NULL;
+	}
+	glfwMakeContextCurrent(window);
+
+	if(!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)){
+		printf("Failed to initialize GLAD");
+		return NULL;
+	}
+	
+
+	debug("Compiling shaders...");
+	//Set up the shaders
+	shaderProgram = setUpShader("../src/shaders/fragment_shader.frag","../src/shaders/vertex_shader.vert");
+	
+	if(shaderProgram == -1){
+		printf("Error reading and compiling shaders\n");
+		return NULL;
+	}
+	
+	float * vertices;
+	int polygonCount;
+	
+	//Load the scene objects
+	Object model;
+	getObject(1, &model);
+	vertexCount = loadModelGPU(&model)*3;
+
+	debug("Vertex count: %d\n", vertexCount);
+	getchar();
+		// note that this is allowed, the call to glVertexAttribPointer registered VBO as the vertex attribute's bound vertex buffer object so afterwards we can safely unbind
+	//glBindBuffer(GL_ARRAY_BUFFER, 0); 
+
+	// remember: do NOT unbind the EBO while a VAO is active as the bound element buffer object IS stored in the VAO; keep the EBO bound.
+	//glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+	// You can unbind the VAO afterwards so other VAO calls won't accidentally modify this VAO, but this rarely happens. Modifying other
+	// VAOs requires a call to glBindVertexArray anyways so we generally don't unbind VAOs (nor VBOs) when it's not directly necessary.
+	//glBindVertexArray(0);
+	return window;
+};
+
+void calculateFrameGPU(unsigned char * pixelData){
+	
+	glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	
+	glUseProgram(shaderProgram);
+
+
+	//Pass the matrices to the shader
+	mat4 view;
+	mat4 projection;
+	vec3 cameraUp = {0.0f, 0.0f, -1.0f};
+	vec3 cameraDir = {ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z};
+	vec3 cameraRight;
+	glm_mat4_identity(view);
+	glm_mat4_identity(projection);
+
+	glm_normalize(cameraDir);
+	glm_vec3_cross(cameraUp, cameraDir, cameraRight);
+	glm_normalize(cameraRight);
+	glm_vec3_cross(cameraDir, cameraRight, cameraUp);
+	glm_normalize(cameraUp);
+
+	glm_perspective(glm_rad(ACTIVE_CAMERA.fov), (float) SCREEN_WIDTH/ (float) SCREEN_HEIGHT, 1.0f, 100.0f, projection);
+	glm_look((vec3) {ACTIVE_CAMERA.pos.x, ACTIVE_CAMERA.pos.y, ACTIVE_CAMERA.pos.z}, cameraDir, cameraUp, view);
+	//glm_look((vec3) {0.0f, 0.0f, 0.0f}, cameraDir, cameraUp, view);
+	//glm_lookat((vec3) {ACTIVE_CAMERA.pos.x, 0.0f, ACTIVE_CAMERA.pos.y}, (vec3) {0.0f, 0.0f, 0.0f}, (vec3) {0.0f, 1.0f, 0.0f}, view);
+
+
+	unsigned int viewLoc= glGetUniformLocation(shaderProgram, "view");
+	unsigned int projectionLoc= glGetUniformLocation(shaderProgram, "projection");
+	unsigned int lightColorLoc = glGetUniformLocation(shaderProgram, "lightColor");
+	unsigned int lightPosLoc = glGetUniformLocation(shaderProgram, "lightPos");
+	unsigned int objectColorLoc = glGetUniformLocation(shaderProgram, "objectColor");
+	glUniformMatrix4fv(viewLoc, 1, GL_FALSE, (float *)view);
+	glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, (float *)projection);
+	vec3 lightColor = {1.0f, 1.0f, 1.0f};
+	vec3 lightPos = {5.0f, 5.0f, 5.0f};
+	vec3 objectColor= {1.0f, 1.0f, 1.0f};
+	glUniform3f(lightColorLoc, 1.0f, 1.0f, 1.0f);
+	glUniform3f(lightPosLoc, 8.0f, 8.0f, 2.0f);
+	glUniform3f(objectColorLoc, 1.0f, 0.5f, 0.3f);
+	// draw our first triangle
+	glBindVertexArray(VAO);
+	//glBindVertexArray(VAO); // seeing as we only have a single VAO there's no need to bind it every time, but we'll do so to keep things a bit more organized
+	
+	//For every object in the scene (every mesh), we have some vertices (that's the actual data).
+	//If we want it to render to the GPU, we create some buffers that then we store. When want to do the actual rendering, we use those buffers (witch store the data, texture, etc) and pass them to the GPU.
+	//For every model, we have at least one VAO and VBO.
+	printf("V count: %d", vertexCount);
+	glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+	//glDrawElements(GL_TRIANGLES, vertexCount, GL_INT, 0);
+	// glBindVertexArray(0); // no need to unbind it every time 
+
+	// glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
+	// -------------------------------------------------------------------------------
+	glfwSwapBuffers(window);
+	glfwPollEvents();
+	
+	glReadPixels(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,GL_RGB, GL_UNSIGNED_BYTE, pixelData);
+}
+
+//Function that reads and sets up the fragment sharder
+unsigned int setUpShader(char * pathToFragment, char * pathToVertex){
+	//Read the fragment shader
+	char * fShaderCode= 0;
+	char * vShaderCode= 0;
+	long lengthF;
+	long lengthV;
+	FILE * f = fopen (pathToFragment, "rb");
+	FILE * v = fopen (pathToVertex, "rb");
+
+	if (f){
+		debug("Reading fragment shader");
+		fseek (f, 0, SEEK_END);
+		lengthF = ftell (f);
+		fseek (f, 0, SEEK_SET);
+		fShaderCode= malloc (lengthF);
+		if (fShaderCode)
+		{
+			fread (fShaderCode, 1, lengthF, f);
+		}
+		fclose (f);
+	}
+
+	if (v){
+		debug("Reading vertex shader");
+		fseek (v, 0, SEEK_END);
+		lengthV = ftell (v);
+		fseek (v, 0, SEEK_SET);
+		vShaderCode= malloc (lengthV);
+		if (vShaderCode)
+		{
+			fread (vShaderCode, 1, lengthV, v);
+		}
+		fclose (v);
+	}
+	
+	debug("Fragment Shader\n %s", fShaderCode);
+	debug("Vertex Shader\n %s", vShaderCode);
+
+	if (!vShaderCode || !fShaderCode){return -1;}
+
+	const char * fShaderCodeConverted = fShaderCode;
+	const char * vShaderCodeConverted = vShaderCode;
+	//Compiles shader
+	unsigned int fragmentShader, vertexShader;
+	int success;
+	char infoLog[512];
+
+	vertexShader= glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vShaderCodeConverted, NULL);
+	glCompileShader(vertexShader);
+	checkCompileShaderErrors(vertexShader, "VERTEX");
+
+	fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fragmentShader, 1, &fShaderCodeConverted, NULL);
+	glCompileShader(fragmentShader);
+	checkCompileShaderErrors(fragmentShader, "FRAGMENT");
+
+	unsigned int ID = glCreateProgram();
+	glAttachShader(ID, vertexShader);
+	glAttachShader(ID, fragmentShader);
+	glLinkProgram(ID);
+	checkCompileShaderErrors(ID, "PROGRAM");
+	// delete the shaders as they're linked into our program now and no longer necessary
+	glDeleteShader(vertexShader);
+	glDeleteShader(fragmentShader);
+
+	return ID;
+}
+
+void checkCompileShaderErrors(unsigned int shader, char *type){
+	int success;
+	char infoLog[1024];
+	if (strcmp(type,"PROGRAM") == 0)
+	{
+			glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+			if (!success)
+			{
+					glGetShaderInfoLog(shader, 1024, NULL, infoLog);
+					printf("ERROR::SHADER_COMPILATION_ERROR of type: %s\n%s\n -- --------------------------------------------------- -- ", type, infoLog);
+			}
+	}
+	else
+	{
+			glGetProgramiv(shader, GL_LINK_STATUS, &success);
+			if (!success)
+			{
+					glGetProgramInfoLog(shader, 1024, NULL, infoLog);
+					printf("ERROR::PROGRAM_LINKING_ERROR of type: %s\n%s\n -- --------------------------------------------------- -- ", type, infoLog);
+			}
+	}
+}
+
+//Function that loads a mesh in the GPU and returns the Polygon Count
+int loadModelGPU(Object * modelToLoad){
+	debug("Loading model\n");
+	//Get the polygon count
+	if(modelToLoad->tipo != Malla){
+		return -1;
+	}
+
+	int polygonCount = modelToLoad->p_malla->n_polygon;
+
+
+	//For each polygon, stores in buffer and sends it to GPU
+	float * vertices;
+	vertices = malloc(sizeof(float)*polygonCount*3*2*3);
+	
+	//Load the Vertex data
+	for(int polygonIndex = 0; polygonIndex<polygonCount; polygonIndex++){
+		vertices[polygonIndex*18] = (float) modelToLoad->p_malla->polygons[polygonIndex].p1.x;
+		vertices[polygonIndex*18+1] = (float) modelToLoad->p_malla->polygons[polygonIndex].p1.y;
+		vertices[polygonIndex*18+2] = (float) modelToLoad->p_malla->polygons[polygonIndex].p1.z;
+		vertices[polygonIndex*18+6] = (float) modelToLoad->p_malla->polygons[polygonIndex].p2.x;
+		vertices[polygonIndex*18+7] = (float) modelToLoad->p_malla->polygons[polygonIndex].p2.y;
+		vertices[polygonIndex*18+8] = (float) modelToLoad->p_malla->polygons[polygonIndex].p2.z;
+		vertices[polygonIndex*18+12] = (float) modelToLoad->p_malla->polygons[polygonIndex].p3.x;
+		vertices[polygonIndex*18+13] = (float) modelToLoad->p_malla->polygons[polygonIndex].p3.y;
+		vertices[polygonIndex*18+14] = (float) modelToLoad->p_malla->polygons[polygonIndex].p3.z;
+		//debug("Inserting polygon %d", polygonIndex);
+		vertices[polygonIndex*18+3] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.x;
+		vertices[polygonIndex*18+4] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.y;
+		vertices[polygonIndex*18+5] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.z;
+		vertices[polygonIndex*18+9] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.x;
+		vertices[polygonIndex*18+10] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.y;
+		vertices[polygonIndex*18+11] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.z;
+		vertices[polygonIndex*18+15] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.x;
+		vertices[polygonIndex*18+16] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.y;
+		vertices[polygonIndex*18+17] = (float) modelToLoad->p_malla->polygons[polygonIndex].normal.z;
+
+	}
+
+	debug("Vertice modelo cargadp: %f %f %f.",vertices[0], vertices[1], vertices[2]);
+	debug("Vertice modelo cargadp: %f %f %f.",vertices[3], vertices[4], vertices[5]);
+	debug("Vertice modelo cargadp: %f %f %f.",vertices[6], vertices[7], vertices[8]);
+  float vertices2[] = {
+         0.5f,  0.5f, 0.0f,  // top right
+         0.5f, -0.5f, 0.0f,  // bottom right
+        -0.5f, -0.5f, 0.0f
+	};
+	debug("Poligonos contados: %d", polygonCount);
+	debug("Vertices insertados: %d", sizeof(vertices));
+	//polygonCount = 1;
+	//The FBO and RBO should be outside this function
+	unsigned int VBO, FBO, RBO, depthRBO;
+	glGenFramebuffers(1, &FBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, FBO);
+
+	glGenRenderbuffers(1, &RBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, RBO);
+
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, SCREEN_WIDTH, SCREEN_HEIGHT);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, RBO);
+	
+	glGenRenderbuffers(1, &depthRBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
+
+	glEnable(GL_DEPTH_TEST);
+	glGenVertexArrays(1, &VAO);
+	glGenBuffers(1, &VBO);
+	//glGenBuffers(1, &EBO);
+	// bind the Vertex Array Object first, then bind and set vertex buffer(s), and then configure vertex attributes(s).
+	glBindVertexArray(VAO);
+
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBufferData(GL_ARRAY_BUFFER, polygonCount*3*3*2*sizeof(float), vertices, GL_STATIC_DRAW);
+
+	//glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	//glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*) (3 * sizeof(float)));
+	glEnableVertexAttribArray(1);
+
+	//glBindBuffer(GL_ARRAY_BUFFER, 0);
+	//glBindVertexArray(0);
+
+	return polygonCount;
+}
+//********************************************************
+//************* Object Management Functions ++++++++++++++++++++
+//********************************************************
+
 
 //Function that manages object adition in the scene
 int addObject(Object object){
@@ -163,25 +489,31 @@ int addObject(Object object){
 	//if the Id to insert is smaller, it for sure will be inserted, otherwise not.
 	int ultimoId = listaObjetos != NULL ? listaObjetos->object.id : 0;
 	
-
 	objectListPushFirst(&listaObjetos, object);
-	return ++ultimoId;
+	ultimoId++;
+	listaObjetos->object.id = ultimoId;
+	debug("Added object. Id: %d", ultimoId);
+	return ultimoId;
 }
 
 //Function that get an specific Object from the scene
 int getObject(int id, Object * object){
+	debug("Getting object with Id: %d", id);
 	ObjectListNode * current = listaObjetos;
 	int encontrado = 0;
 	//Searchs for the object in the list with matching id
 	while(current != NULL && !encontrado){
+		debug("Current: %d", current->object.id);
 		if(current->object.id == id){
 			encontrado = 1;
+			break;
 		}else{
 			current = current->next;
 		}
 	}
 	//If finded return 0, if not returns -1
 	if(encontrado){
+		debug("Object finded");
 		*object = current->object;
 		return  0;
 	}else{

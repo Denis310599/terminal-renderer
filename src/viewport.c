@@ -1,3 +1,4 @@
+#include <GL/gl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include "../include/renderer.h"
@@ -5,11 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+//#include "./include/glad/glad.h"
+#include <GLFW/glfw3.h>
 
 #include "../lib/lpng1644/png.h"
 
 void postProcessFrameToChar(Pixel * frameBuffer, char * output);
-void printFrameGP(Pixel * buffer);
+void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in);
 void importStl(char * path, Vector3d scale, Vector3d pos);
 char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen);
 
@@ -17,17 +20,19 @@ int FRAME_BUFFER_INDEX = 0;
 
 int main(){
 	//return 0;
-	DEBUG = 0;
+	DEBUG = 1;
 	//Set up the renderer
 	printf("Starting...\n");
 	initRenderer();
-	SCREEN_WIDTH=400;
-	SCREEN_HEIGHT=100;
+	SCREEN_WIDTH=1280;
+	SCREEN_HEIGHT=720;
 	PIXEL_RESOL = 1;
+	GPU_MODE = 1;
 
 	//Define the objects
 	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 0, 0});
-	//importStl("../assets/eevee2.stl", (Vector3d){0.1, 0.1, 0.1}, (Vector3d){8, 0, 0});
+	//importStl("../assets/eevee2.stl", (Vector3d){0.1, 0.1, 0.1}, (Vector3d){47, 214, 0});
+	GLFWwindow * window = setUpOpenGL();
 	//return 0;
 
 	Object cubeObj;
@@ -39,7 +44,7 @@ int main(){
 	planeObj.tipo = Plano;
 	Plane myPlane = {(Vector3d){0, 0, 0}, (Vector3d){0, 0, 1}};
 	planeObj.plano = myPlane;
-	addObject(planeObj);
+	//addObject(planeObj);
 	//addObject(cubeObj);
 	myCube.pos = (Vector3d){0, 0, 0};
 	myCube.escala = (Vector3d){0.5, 0.5, 0.5};
@@ -68,15 +73,16 @@ int main(){
 	Camera myCam;
 	//myCam.pos = (Vector3d){15, 0, 8};
 	//myCam.pos = (Vector3d){70, 0, 50};
-	myCam.pos = (Vector3d){5, 0, 3.5};
-	myCam.dir = (Vector3d){-5, 0, -5};
-	myCam.fov = 90;
+	myCam.pos = (Vector3d){6, 0, 3};
+	myCam.dir = (Vector3d){2, 0, 3};
+	myCam.fov = 45;
 	
 	ACTIVE_CAMERA = myCam;
 	FAST_LIGHT=0;
 
 	//Define the frame buffer
 	Pixel * frameBuffer = malloc(SCREEN_WIDTH*SCREEN_HEIGHT*sizeof(Pixel));//[SCREEN_WIDTH*SCREEN_HEIGHT];
+	unsigned char *pixelDataBuffer = (unsigned char *) malloc(SCREEN_WIDTH*SCREEN_HEIGHT*3*sizeof(char));
   char * output = malloc(sizeof(char)*(((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10));//;[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10];
 
 	//Time metrics
@@ -91,17 +97,26 @@ int main(){
 	//renderFrame(frameBuffer);
 	
 	printf("\033[2J");
-	while(1){
+	//while(1){
+	while(!glfwWindowShouldClose(window)){
+		if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS){
+			glfwSetWindowShouldClose(window, 1);
+		}
+
+
 		//Calculate position of the objects in the scene (in this case the camera)
 		cameraRotationQuaternion = newQuat((Vector3d) {0, 0, 1}, angularSpeed * dt);
 		ACTIVE_CAMERA.pos = vect_rot(ACTIVE_CAMERA.pos, cameraRotationQuaternion);
 		ACTIVE_CAMERA.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, ACTIVE_CAMERA.pos, -1));
 		//printf("Active Dir: x %f y %f z %f\n", ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z);
 		//Render the frame
-		renderFrame(frameBuffer);
-		printFrameGP(frameBuffer);
-		postProcessFrameToChar(frameBuffer,output);
-		printf("%s\n", output);
+		calculateFrameGPU(pixelDataBuffer);
+		//renderFrame(frameBuffer);
+		printFrameGP(frameBuffer, pixelDataBuffer);
+
+		//printFrameGP(frameBuffer, NULL);
+		//postProcessFrameToChar(frameBuffer,output);
+		//printf("%s\n", output);
 		
 		//Calculate metrics
 		//printf("\033[2J");
@@ -235,48 +250,74 @@ void importStl(char * path, Vector3d scale, Vector3d pos){
 }
 
 
-void printFrameGP(Pixel * buffer){
+void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
 	//Create the header
-	char headerMsg[] = "\033_Ga=T,i=1,m=%d,x=1234,y=1234,c=1,f=24,s=12345,v=12345,q=1;\033\\";
-	char headerMsg2[] = "\033_Gm=12345;\033\\";
+	//char headerMsg[] = "\033_Ga=T,i=1,m=%d,x=1234,y=1234,c=1,f=24,s=12345,v=12345,q=1;\033\\";
+	//char headerMsg2[] = "\033_Gm=12345;\033\\";
 	long int pixelCount = SCREEN_WIDTH*SCREEN_HEIGHT;
-	unsigned char * pixelData = malloc(sizeof(unsigned char)*pixelCount*3);
+	unsigned char * pixelData;// = malloc(sizeof(unsigned char)*pixelCount*3);
 	size_t output_length;
 	char * payload; 
 	size_t payloadToRead = 0;
 	//char output[2000]
 	int m = 1;
 	int offset = 0;
-	unsigned char *printBuffer = malloc((strlen(headerMsg) + strlen(headerMsg2)*(1+(pixelCount*4/4096))+pixelCount*4)*sizeof(char));
-	unsigned char *auxBuffer = malloc(5100 * sizeof(char)); 
+	//unsigned char *printBuffer = malloc((strlen(headerMsg) + strlen(headerMsg2)*(1+(pixelCount*4/4096))+pixelCount*4)*sizeof(char));
+	//unsigned char *auxBuffer = malloc(5100 * sizeof(char)); 
 
-	//Creates the pixel data
-	for(long int pixel_index = 0; pixel_index<pixelCount; pixel_index++){
-		pixelData[pixel_index*3] = (unsigned char) buffer[pixel_index].r;
-		pixelData[pixel_index*3+1] = (unsigned char) buffer[pixel_index].r;
-		pixelData[pixel_index*3+2] = (unsigned char) buffer[pixel_index].r;
+	if(pixel_data_in == NULL){
+		//Creates the pixel data
+		pixelData = malloc(sizeof(unsigned char)*pixelCount*3); 
+		for(long int pixel_index = 0; pixel_index<pixelCount; pixel_index++){
+			pixelData[pixel_index*3] = (unsigned char) buffer[pixel_index].r;
+			pixelData[pixel_index*3+1] = (unsigned char) buffer[pixel_index].r;
+			pixelData[pixel_index*3+2] = (unsigned char) buffer[pixel_index].r;
+		}
+	}else{
+		pixelData = pixel_data_in;
 	}
-
 	//Creates the protocol message to be printed that kitty protocol understands.
 	payload = base64_encode(pixelData, pixelCount*3, &output_length);
-	m = (output_length>4096)? 1 : 0;
+	//Montamos las cabeceras
 	FRAME_BUFFER_INDEX = !FRAME_BUFFER_INDEX;
+	m = (output_length>4096)? 1 : 0;
+	//sprintf((char *) headerMsg, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	//sprintf((char *) headerMsg2, "\033_Gm=1;\033\\");
 	printf("\x1b[%d;%dH", 10, 20);
-	sprintf((char *) printBuffer, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	//sprintf((char *) printBuffer, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	//puts(headerMsg);
+	
+	printf("\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	fflush(stdout);	
+	//char * test = "1234";
 	while(m==1){
 		m = (output_length>4096)? 1 : 0;
 		payloadToRead= (output_length>4096)?4096:output_length;
-		sprintf((char *) auxBuffer,"\033_Gm=%d;%.*s\033\\",m, (int) payloadToRead, payload+offset);
-		strncat((char *) printBuffer, (char *) auxBuffer, strlen((char *)auxBuffer));
+		//sprintf((char *) auxBuffer,"\033_Gm=%d;%.*s\033\\",m, (int) payloadToRead, payload+offset);
+		//sprintf((char *) auxBuffer,"%.*s", (int) payloadToRead, payload+offset);
+		//strncat((char *) printBuffer, (char *) auxBuffer, strlen((char *)auxBuffer));
+		if(m==1) fwrite("\033_Gm=1;", 1, 7, stdout);
+		else     fwrite("\033_Gm=0;", 1, 7, stdout);
+
+		//printf("Buffer con fwrite: %d, %d\n", offset, (int) payloadToRead);
+		fwrite(&payload[offset], sizeof(char), (int) payloadToRead, stdout);
+		//printf("%s",auxBuffer);
+		//printf("\n");
+		//fwrite(&test[1], sizeof(char), 2, stdout);
+		//puts("\033\\");
+		fwrite("\033\\", 1, 2, stdout);
 		offset +=payloadToRead;
 		output_length-=payloadToRead;
 	}
+		//getchar();
 
 	//Prints the actual message
-	printf("%s", printBuffer);
-	fflush(stdout);
+	//printf("%s", printBuffer);
+	//puts(printBuffer);
+	//puts(payload);
+	//fflush(stdout);
 	printf("\033_Ga=d,d=i,i=%d\033\\",!FRAME_BUFFER_INDEX+1);
-	fflush(stdout);
+	//fflush(stdout);
 	printf("\x1b[%d;%dH", 8, 20);
 }
 
