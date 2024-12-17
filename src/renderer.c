@@ -94,6 +94,7 @@ unsigned int setUpFragmentShader(char * path);
 void checkCompileShaderErrors(unsigned int shader, char *type);
 unsigned int setUpShader(char * pathToFragment, char * pathToVertex);
 int loadModelGPU(Object * modelToLoad);
+void loadAllModelsGPU(ObjectListNode * objectList);
 //We configure the renderer via its global variables.
 //DELTA_TIME
 //
@@ -115,8 +116,8 @@ LightListNode * listaLuces = NULL;
 
 GLFWwindow * window = NULL;
 unsigned int shaderProgram;
-unsigned int VAO;
 int vertexCount = 0;
+mat4 projection;
 
 //********************************************************
 //************* Public accessible functions
@@ -209,17 +210,30 @@ GLFWwindow * setUpOpenGL(){
 		printf("Error reading and compiling shaders\n");
 		return NULL;
 	}
+
+	//Set up background buffer and depth testing
+	unsigned int RBO, depthRBO;
+	glGenRenderbuffers(1, &RBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, RBO);
+
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, SCREEN_WIDTH, SCREEN_HEIGHT);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, RBO);
 	
+	glGenRenderbuffers(1, &depthRBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
+
+	glEnable(GL_DEPTH_TEST);
+
 	float * vertices;
 	int polygonCount;
 	
 	//Load the scene objects
 	Object model;
 	getObject(1, &model);
-	vertexCount = loadModelGPU(&model)*3;
+	loadAllModelsGPU(listaObjetos);
 
-	debug("Vertex count: %d\n", vertexCount);
-	getchar();
 		// note that this is allowed, the call to glVertexAttribPointer registered VBO as the vertex attribute's bound vertex buffer object so afterwards we can safely unbind
 	//glBindBuffer(GL_ARRAY_BUFFER, 0); 
 
@@ -242,7 +256,6 @@ void calculateFrameGPU(unsigned char * pixelData){
 
 	//Pass the matrices to the shader
 	mat4 view;
-	mat4 projection;
 	vec3 cameraUp = {0.0f, 0.0f, -1.0f};
 	vec3 cameraDir = {ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z};
 	vec3 cameraRight;
@@ -272,25 +285,28 @@ void calculateFrameGPU(unsigned char * pixelData){
 	vec3 lightPos = {5.0f, 5.0f, 5.0f};
 	vec3 objectColor= {1.0f, 1.0f, 1.0f};
 	glUniform3f(lightColorLoc, 1.0f, 1.0f, 1.0f);
-	glUniform3f(lightPosLoc, 8.0f, 8.0f, 2.0f);
+	glUniform3f(lightPosLoc, ACTIVE_CAMERA.pos.x, ACTIVE_CAMERA.pos.y, ACTIVE_CAMERA.pos.z);//8.0f, 8.0f, 2.0f);
 	glUniform3f(objectColorLoc, 1.0f, 0.5f, 0.3f);
-	// draw our first triangle
-	glBindVertexArray(VAO);
-	//glBindVertexArray(VAO); // seeing as we only have a single VAO there's no need to bind it every time, but we'll do so to keep things a bit more organized
+
+	//For everu object we draw it
+	ObjectListNode * current = listaObjetos;
+	while(current != NULL){
+		if(current->object.tipo == Malla){	
+			debug("Rendering object with id: %d", current->object.id);
+			glBindVertexArray(current->object.p_malla->VAO);
+			glDrawArrays(GL_TRIANGLES, 0, current->object.p_malla->n_polygon*3);
+		}
+		//getchar();
+		current = current->next;
+	}
 	
-	//For every object in the scene (every mesh), we have some vertices (that's the actual data).
-	//If we want it to render to the GPU, we create some buffers that then we store. When want to do the actual rendering, we use those buffers (witch store the data, texture, etc) and pass them to the GPU.
-	//For every model, we have at least one VAO and VBO.
-	printf("V count: %d", vertexCount);
-	glDrawArrays(GL_TRIANGLES, 0, vertexCount);
-	//glDrawElements(GL_TRIANGLES, vertexCount, GL_INT, 0);
-	// glBindVertexArray(0); // no need to unbind it every time 
 
 	// glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
 	// -------------------------------------------------------------------------------
 	glfwSwapBuffers(window);
 	glfwPollEvents();
 	
+	//Pass the image pixels
 	glReadPixels(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,GL_RGB, GL_UNSIGNED_BYTE, pixelData);
 }
 
@@ -387,6 +403,15 @@ void checkCompileShaderErrors(unsigned int shader, char *type){
 	}
 }
 
+//Function that loads all objects in the GPU
+void loadAllModelsGPU(ObjectListNode * objectList){
+	ObjectListNode * current = objectList;
+	while(current != NULL){
+		loadModelGPU(&current->object);
+		current = current->next;
+	}
+}
+
 //Function that loads a mesh in the GPU and returns the Polygon Count
 int loadModelGPU(Object * modelToLoad){
 	debug("Loading model\n");
@@ -438,22 +463,7 @@ int loadModelGPU(Object * modelToLoad){
 	debug("Vertices insertados: %d", sizeof(vertices));
 	//polygonCount = 1;
 	//The FBO and RBO should be outside this function
-	unsigned int VBO, FBO, RBO, depthRBO;
-	glGenFramebuffers(1, &FBO);
-	glBindFramebuffer(GL_FRAMEBUFFER, FBO);
-
-	glGenRenderbuffers(1, &RBO);
-	glBindRenderbuffer(GL_RENDERBUFFER, RBO);
-
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, SCREEN_WIDTH, SCREEN_HEIGHT);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, RBO);
-	
-	glGenRenderbuffers(1, &depthRBO);
-	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
-
-	glEnable(GL_DEPTH_TEST);
+	unsigned int VAO, VBO, FBO;
 	glGenVertexArrays(1, &VAO);
 	glGenBuffers(1, &VBO);
 	//glGenBuffers(1, &EBO);
@@ -471,6 +481,8 @@ int loadModelGPU(Object * modelToLoad){
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*) (3 * sizeof(float)));
 	glEnableVertexAttribArray(1);
+
+	modelToLoad->p_malla->VAO = VAO;
 
 	//glBindBuffer(GL_ARRAY_BUFFER, 0);
 	//glBindVertexArray(0);
@@ -493,6 +505,10 @@ int addObject(Object object){
 	ultimoId++;
 	listaObjetos->object.id = ultimoId;
 	debug("Added object. Id: %d", ultimoId);
+
+	if(GPU_MODE==1){
+		loadModelGPU(&object);
+	}
 	return ultimoId;
 }
 
@@ -1363,9 +1379,9 @@ Mesh * newMesh(Polygon * polygonArray, int n_polygon, Vector3d scale, Vector3d p
 	Mesh * m = malloc(sizeof(int) + sizeof(Polygon) * n_polygon);
 	for (int i = 0; i < n_polygon; i++){
 		m->polygons[i] = polygonArray[i];
-		m->polygons[i].p1 = vect_sum(vect_element_product(m->polygons[i].p1, scale), position, 1);
-		m->polygons[i].p2 = vect_sum(vect_element_product(m->polygons[i].p2, scale), position, 1);
-		m->polygons[i].p3 = vect_sum(vect_element_product(m->polygons[i].p3, scale), position, 1);
+		m->polygons[i].p1 = vect_element_product(vect_sum(m->polygons[i].p1, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p1, scale), position, 1);
+		m->polygons[i].p2 = vect_element_product(vect_sum(m->polygons[i].p2, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p2, scale), position, 1);
+		m->polygons[i].p3 = vect_element_product(vect_sum(m->polygons[i].p3, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p3, scale), position, 1);
 	}
 	m->n_polygon = n_polygon;
 	return m;

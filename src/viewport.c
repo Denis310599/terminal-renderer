@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 //#include "./include/glad/glad.h"
 #include <GLFW/glfw3.h>
 
@@ -14,15 +18,23 @@
 void postProcessFrameToChar(Pixel * frameBuffer, char * output);
 void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in);
 void importStl(char * path, Vector3d scale, Vector3d pos);
+void encode_png(unsigned char* raw_data, int width, int height);
 char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen);
 
 int FRAME_BUFFER_INDEX = 0;
 
+#define SHM_NAME "/png_shared_memory"  // Shared memory name
+#define SHM_SIZE (1024 * 1024)         // Shared memory size (1MB)
+
+char * payload; 
+size_t output_length;
+
 int main(){
 	//return 0;
-	DEBUG = 1;
+	DEBUG = 0;
 	//Set up the renderer
 	printf("Starting...\n");
+	payload = base64_encode(SHM_NAME, strlen(	SHM_NAME), &output_length);
 	initRenderer();
 	SCREEN_WIDTH=1280;
 	SCREEN_HEIGHT=720;
@@ -30,9 +42,11 @@ int main(){
 	GPU_MODE = 1;
 
 	//Define the objects
-	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 0, 0});
-	//importStl("../assets/eevee2.stl", (Vector3d){0.1, 0.1, 0.1}, (Vector3d){47, 214, 0});
 	GLFWwindow * window = setUpOpenGL();
+	
+	importStl("../assets/eevee2.stl", (Vector3d){0.03f, 0.03f, 0.03f}, (Vector3d){-130, 214, 0});
+	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 0, 0});
+	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 10, 0});
 	//return 0;
 
 	Object cubeObj;
@@ -45,12 +59,12 @@ int main(){
 	Plane myPlane = {(Vector3d){0, 0, 0}, (Vector3d){0, 0, 1}};
 	planeObj.plano = myPlane;
 	//addObject(planeObj);
-	//addObject(cubeObj);
-	myCube.pos = (Vector3d){0, 0, 0};
+	addObject(cubeObj);
+	myCube.pos = (Vector3d){0, 6, 0};
 	myCube.escala = (Vector3d){0.5, 0.5, 0.5};
 	myCube.rotacion = (Vector3d){0, 0, 0};
 	cubeObj.cubo = myCube;
-	//addObject(cubeObj);
+	addObject(cubeObj);
 
 	//Define the lights
 	Light light;
@@ -73,7 +87,7 @@ int main(){
 	Camera myCam;
 	//myCam.pos = (Vector3d){15, 0, 8};
 	//myCam.pos = (Vector3d){70, 0, 50};
-	myCam.pos = (Vector3d){6, 0, 3};
+	myCam.pos = (Vector3d){10, 0, 3};
 	myCam.dir = (Vector3d){2, 0, 3};
 	myCam.fov = 45;
 	
@@ -240,7 +254,7 @@ void importStl(char * path, Vector3d scale, Vector3d pos){
 		//break;
 	}
 	printf("Center of Object: x %f y %f z %f", meanPosition.x, meanPosition.y, meanPosition.z);
-	getchar();
+	//getchar();
 	//create the mesh
 	Mesh *myMesh = newMesh(polygonArr, n_triangulos, scale, pos);
 	meshObject.p_malla = myMesh;
@@ -256,9 +270,10 @@ void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
 	//char headerMsg2[] = "\033_Gm=12345;\033\\";
 	long int pixelCount = SCREEN_WIDTH*SCREEN_HEIGHT;
 	unsigned char * pixelData;// = malloc(sizeof(unsigned char)*pixelCount*3);
-	size_t output_length;
-	char * payload; 
 	size_t payloadToRead = 0;
+	//char * payload; 
+//size_t output_length;
+
 	//char output[2000]
 	int m = 1;
 	int offset = 0;
@@ -277,20 +292,30 @@ void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
 		pixelData = pixel_data_in;
 	}
 	//Creates the protocol message to be printed that kitty protocol understands.
-	payload = base64_encode(pixelData, pixelCount*3, &output_length);
+	//payload = base64_encode(pixelData, pixelCount*3, &output_length);
+	//const char * imagePath = "/home/denis/cosasMias/Proyectos/terminal-renderer/build/output.png";
+	//unsigned char imagePath2[] = "/home/denis/cosasMias/Proyectos/terminal-renderer/build/output.png";
+	encode_png(pixelData, SCREEN_WIDTH, SCREEN_HEIGHT);
+	//payload = base64_encode(SHM_NAME, strlen(	SHM_NAME), &output_length);
 	//Montamos las cabeceras
 	FRAME_BUFFER_INDEX = !FRAME_BUFFER_INDEX;
 	m = (output_length>4096)? 1 : 0;
+	//m=1;
 	//sprintf((char *) headerMsg, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
 	//sprintf((char *) headerMsg2, "\033_Gm=1;\033\\");
 	printf("\x1b[%d;%dH", 10, 20);
 	//sprintf((char *) printBuffer, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
 	//puts(headerMsg);
 	
-	printf("\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	//printf("%d\n", (int) output_length);
+	printf("\033_Ga=T,t=s,i=%d,f=100,q=2;",FRAME_BUFFER_INDEX+1);
 	fflush(stdout);	
+	fwrite(&payload[0], sizeof(char), (int) output_length, stdout);
+	printf("\033\\");
+	fflush(stdout);	
+	//printf("\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
 	//char * test = "1234";
-	while(m==1){
+	/*while(m==1){
 		m = (output_length>4096)? 1 : 0;
 		payloadToRead= (output_length>4096)?4096:output_length;
 		//sprintf((char *) auxBuffer,"\033_Gm=%d;%.*s\033\\",m, (int) payloadToRead, payload+offset);
@@ -308,21 +333,154 @@ void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
 		fwrite("\033\\", 1, 2, stdout);
 		offset +=payloadToRead;
 		output_length-=payloadToRead;
-	}
+	}*/
 		//getchar();
-
+	
 	//Prints the actual message
 	//printf("%s", printBuffer);
 	//puts(printBuffer);
 	//puts(payload);
 	//fflush(stdout);
+	//free(pixelData);
 	printf("\033_Ga=d,d=i,i=%d\033\\",!FRAME_BUFFER_INDEX+1);
 	//fflush(stdout);
 	printf("\x1b[%d;%dH", 8, 20);
+	//getchar();
 }
 
 static const unsigned char base64_table[65] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+
+// Custom write function to write PNG data into a memory buffer
+typedef struct {
+    unsigned char *buffer;
+    size_t size;
+    size_t capacity;
+} memory_writer;
+
+//function that writes an image to the shared memory
+void png_memory_write(png_structp png_ptr, png_bytep data, png_size_t length) {
+    memory_writer *mem = (memory_writer *)png_get_io_ptr(png_ptr);
+    if (mem->size + length > mem->capacity) {
+        fprintf(stderr, "Buffer overflow while writing PNG data\n");
+        longjmp(png_jmpbuf(png_ptr), 1);
+    }
+    memcpy(mem->buffer + mem->size, data, length);
+    mem->size += length;
+}
+
+//Function that encodes an image as PNG and sotores it in shared memory
+void encode_png(unsigned char* raw_data, int width, int height) {
+    //FILE *fp = fopen(filename, "wb");
+    //if (!fp) {
+    //    printf("File opening failed");
+    //    return;
+    //}
+
+		// Allocate memory for PNG encoding
+		size_t buffer_size = SHM_SIZE;
+    unsigned char *png_buffer = (unsigned char *)malloc(buffer_size);
+
+	memory_writer mem = {png_buffer, 0, buffer_size};
+    
+	// Create png_struct and png_info structures
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png) {
+        printf("png_create_write_struct failed");
+        //fclose(fp);
+        return;
+    }
+
+    png_infop info = png_create_info_struct(png);
+    if (!info) {
+        printf("png_create_info_struct failed");
+        png_destroy_write_struct(&png, (png_infopp)NULL);
+        //fclose(fp);
+        return;
+    }
+
+    // Set error handling (if needed)
+    if (setjmp(png_jmpbuf(png))) {
+        printf("Error during PNG creation");
+        png_destroy_write_struct(&png, &info);
+        //fclose(fp);
+        return;
+    }
+	
+	png_set_write_fn(png, &mem, png_memory_write, NULL);
+	png_set_compression_level(png, 1); // Fastest compression
+	png_set_filter(png, 0, PNG_FILTER_NONE);
+
+    // Initialize the IO for writing the image to the file
+    //png_init_io(png, fp);
+
+    // Write the PNG header (signature)
+    png_set_IHDR(
+        png, info,
+        width, height,
+        8, PNG_COLOR_TYPE_RGB, // 8 bits per channel, RGBA format
+        PNG_INTERLACE_NONE,     // No interlacing
+        PNG_COMPRESSION_TYPE_DEFAULT, // Default compression
+        PNG_FILTER_TYPE_DEFAULT // Default filter
+    );
+
+    png_write_info(png, info);
+
+    // Prepare row pointers for each row of the image (raw_data is an array of pixel data)
+    png_bytep rows[height];
+    for (int i = 0; i < height; i++) {
+        rows[i] = raw_data + i * width * 3;  // 4 bytes per pixel (RGBA)
+    }
+
+    // Write the image data to the PNG file
+    png_write_image(png, rows);
+
+    // Finish the PNG creation
+    png_write_end(png, NULL);
+
+    // Clean up and close the file
+    png_destroy_write_struct(&png, &info);
+    //fclose(fp);
+		
+    // Create shared memory object
+    int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("Failed to create shared memory object");
+        free(png_buffer);
+        return;
+    }
+
+    // Resize shared memory to fit the PNG data
+    if (ftruncate(shm_fd, mem.size) == -1) {
+        perror("Failed to resize shared memory object");
+        close(shm_fd);
+        shm_unlink(SHM_NAME);
+        free(png_buffer);
+        return;
+    }
+
+    // Map shared memory into address space
+    void *shm_ptr = mmap(NULL, mem.size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shm_ptr == MAP_FAILED) {
+        perror("Failed to map shared memory");
+        close(shm_fd);
+        shm_unlink(SHM_NAME);
+        free(png_buffer);
+        return;
+    }
+
+	// Copy PNG data into shared memory
+    memcpy(shm_ptr, png_buffer, mem.size);
+    //printf("PNG data written to shared memory: %s\n", SHM_NAME);
+
+    // Cleanup
+    munmap(shm_ptr, mem.size);
+    close(shm_fd);
+    free(png_buffer);
+}
+
+
 
 /**
 * base64_encode - Base64 encode
