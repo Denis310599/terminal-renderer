@@ -29,6 +29,62 @@ int FRAME_BUFFER_INDEX = 0;
 char * payload; 
 size_t output_length;
 
+/*Function that creates a new viewport object*/
+void create_viewport(ViewportSettings * viewportSettings){
+	RenderSettings * renderSettings = malloc(sizeof(RenderSettings));
+	renderSettings->gpu_mode = 1;
+	renderSettings->front_clip = 0.1;
+	renderSettings->color_mode = 1;
+	renderSettings->screen_width = 600;
+	renderSettings->screen_height = 400;
+
+	viewportSettings->x = 0;
+	viewportSettings->y = 0;
+	viewportSettings->screen_width = 600;
+	viewportSettings->screen_height = 400;
+	viewportSettings->is_viewport = 0;
+	viewportSettings->render_settings = renderSettings;
+}
+
+void init_viewport(ViewportSettings * viewportSettings){
+	//Initiates openGL
+	if(viewportSettings->render_settings->gpu_mode){
+		GLFWwindow * window = setUpOpenGL(viewportSettings);
+	}
+
+
+	Pixel * frameBuffer = malloc(viewportSettings->screen_width*viewportSettings->screen_height*sizeof(Pixel));//[SCREEN_WIDTH*SCREEN_HEIGHT];
+	unsigned char *pixelDataBuffer = (unsigned char *) malloc(viewportSettings->screen_width*viewportSettings->screen_height*3*sizeof(char));
+
+	//I dont know if this will fail, don't know if this address won't be accessed by other part of the program
+	viewportSettings->pixel_data_buffer = &frameBuffer;
+	viewportSettings->gpu_frame_buffer = &pixelDataBuffer;
+
+	
+}
+
+/*Function that renders a frame in a viewport*/
+void render_viewport(ViewportSettings * viewportSettings){
+	//Orders to render a new frame with
+	if(viewportSettings->render_settings->gpu_mode){
+		calculateFrameGPU(viewportSettings, *(viewportSettings->gpu_frame_buffer));
+	}else{
+		renderFrame(*(viewportSettings->pixel_data_buffer));
+	}
+
+	//Shows in the renderer
+	printFrameGP(*(viewportSettings->pixel_data_buffer),*(viewportSettings->gpu_frame_buffer));
+	
+	//In case we want to render this to char
+  //char * output = malloc(sizeof(char)*(((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10));//;[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10];
+	//postProcessFrameToChar(frameBuffer,output);
+	//printf("%s\n", output);
+
+
+}
+
+//TODO: Crear inicializador y configurador de render settings
+
 int main(){
 	//return 0;
 	DEBUG = 0;
@@ -42,7 +98,18 @@ int main(){
 	GPU_MODE = 1;
 
 	//Define the objects
-	GLFWwindow * window = setUpOpenGL();
+	RenderSettings renderSettings;
+	renderSettings.gpu_mode = 1;
+	renderSettings.front_clip = 0.1;
+	renderSettings.color_mode = 1;
+	renderSettings.screen_width = 1280;
+	renderSettings.screen_height = 720;
+	ViewportSettings viewport;
+	viewport.screen_width = 1280;
+	viewport.screen_height = 720;
+	viewport.render_settings = &renderSettings;
+	GLFWwindow * window = setUpOpenGL(&viewport);
+	//getchar();
 	
 	importStl("../assets/eevee2.stl", (Vector3d){0.03f, 0.03f, 0.03f}, (Vector3d){-130, 214, 0});
 	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 0, 0});
@@ -92,6 +159,7 @@ int main(){
 	myCam.fov = 45;
 	
 	ACTIVE_CAMERA = myCam;
+	renderSettings.active_camera = myCam;
 	FAST_LIGHT=0;
 
 	//Define the frame buffer
@@ -122,9 +190,10 @@ int main(){
 		cameraRotationQuaternion = newQuat((Vector3d) {0, 0, 1}, angularSpeed * dt);
 		ACTIVE_CAMERA.pos = vect_rot(ACTIVE_CAMERA.pos, cameraRotationQuaternion);
 		ACTIVE_CAMERA.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, ACTIVE_CAMERA.pos, -1));
+		renderSettings.active_camera = ACTIVE_CAMERA;
 		//printf("Active Dir: x %f y %f z %f\n", ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z);
 		//Render the frame
-		calculateFrameGPU(pixelDataBuffer);
+		calculateFrameGPU(&viewport ,pixelDataBuffer);
 		//renderFrame(frameBuffer);
 		printFrameGP(frameBuffer, pixelDataBuffer);
 
@@ -263,7 +332,7 @@ void importStl(char * path, Vector3d scale, Vector3d pos){
 	//Return the mesh
 }
 
-
+/*This function renders an image in the terminal using the graphic protocol*/
 void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
 	//Create the header
 	//char headerMsg[] = "\033_Ga=T,i=1,m=%d,x=1234,y=1234,c=1,f=24,s=12345,v=12345,q=1;\033\\";
