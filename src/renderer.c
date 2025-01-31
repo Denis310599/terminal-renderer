@@ -90,7 +90,6 @@ void freeList(ObjectListNode * head);
 void freeLightList(LightListNode * head);
 
 //GPU Rendering-related Functions
-unsigned int setUpFragmentShader(char * path);
 void checkCompileShaderErrors(unsigned int shader, char *type);
 unsigned int setUpShader(char * pathToFragment, char * pathToVertex);
 int loadModelGPU(Object * modelToLoad);
@@ -180,14 +179,14 @@ void initRenderer(){
 
 
 //Function that setsup the GPU renderer
-GLFWwindow * setUpOpenGL(){
+GLFWwindow * setUpOpenGL(ViewportSettings * viewport_settings){
 	debug("Setting Up OpenGL");
 	glfwInit();
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 
-	window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Terminal-Renderer", NULL, NULL);
+	window = glfwCreateWindow(viewport_settings->screen_width, viewport_settings->screen_height, "Terminal-Renderer", NULL, NULL);
 	if (window == NULL)
 	{
 			printf("Failed to create GLFW window");
@@ -210,18 +209,19 @@ GLFWwindow * setUpOpenGL(){
 		printf("Error reading and compiling shaders\n");
 		return NULL;
 	}
+	viewport_settings->render_settings->shader_program = shaderProgram;
 
 	//Set up background buffer and depth testing
 	unsigned int RBO, depthRBO;
 	glGenRenderbuffers(1, &RBO);
 	glBindRenderbuffer(GL_RENDERBUFFER, RBO);
 
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, SCREEN_WIDTH, SCREEN_HEIGHT);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, viewport_settings->screen_width, viewport_settings->screen_height);
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, RBO);
 	
 	glGenRenderbuffers(1, &depthRBO);
 	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, viewport_settings->screen_width, viewport_settings->screen_height);
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
 
 	glEnable(GL_DEPTH_TEST);
@@ -243,24 +243,28 @@ GLFWwindow * setUpOpenGL(){
 	// You can unbind the VAO afterwards so other VAO calls won't accidentally modify this VAO, but this rarely happens. Modifying other
 	// VAOs requires a call to glBindVertexArray anyways so we generally don't unbind VAOs (nor VBOs) when it's not directly necessary.
 	//glBindVertexArray(0);
+	viewport_settings->window = window;
 	return window;
+
 };
 
-void calculateFrameGPU(unsigned char * pixelData){
-	
+void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pixelData){
+
+	Camera currentActiveCam = viewport_settings->render_settings->active_camera;
 	glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
-	glUseProgram(shaderProgram);
+	glUseProgram(viewport_settings->render_settings->shader_program);
 
 
 	//Pass the matrices to the shader
 	mat4 view;
 	vec3 cameraUp = {0.0f, 0.0f, -1.0f};
-	vec3 cameraDir = {ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z};
+	vec3 cameraDir = {currentActiveCam.dir.x, currentActiveCam.dir.y, currentActiveCam.dir.z};
 	vec3 cameraRight;
 	glm_mat4_identity(view);
 	glm_mat4_identity(projection);
+	//debug("Camera dir: %f, %f, %f", cameraDir[0], cameraDir[1], cameraDir[2]);
 
 	glm_normalize(cameraDir);
 	glm_vec3_cross(cameraUp, cameraDir, cameraRight);
@@ -268,24 +272,24 @@ void calculateFrameGPU(unsigned char * pixelData){
 	glm_vec3_cross(cameraDir, cameraRight, cameraUp);
 	glm_normalize(cameraUp);
 
-	glm_perspective(glm_rad(ACTIVE_CAMERA.fov), (float) SCREEN_WIDTH/ (float) SCREEN_HEIGHT, 1.0f, 100.0f, projection);
-	glm_look((vec3) {ACTIVE_CAMERA.pos.x, ACTIVE_CAMERA.pos.y, ACTIVE_CAMERA.pos.z}, cameraDir, cameraUp, view);
+	glm_perspective(glm_rad(currentActiveCam.fov), (float) (viewport_settings->render_settings->screen_width)/ (float) (viewport_settings->render_settings->screen_height), 1.0f, 100.0f, projection);
+	glm_look((vec3) { currentActiveCam.pos.x, currentActiveCam.pos.y, currentActiveCam.pos.z}, cameraDir, cameraUp, view);
 	//glm_look((vec3) {0.0f, 0.0f, 0.0f}, cameraDir, cameraUp, view);
 	//glm_lookat((vec3) {ACTIVE_CAMERA.pos.x, 0.0f, ACTIVE_CAMERA.pos.y}, (vec3) {0.0f, 0.0f, 0.0f}, (vec3) {0.0f, 1.0f, 0.0f}, view);
 
 
-	unsigned int viewLoc= glGetUniformLocation(shaderProgram, "view");
-	unsigned int projectionLoc= glGetUniformLocation(shaderProgram, "projection");
-	unsigned int lightColorLoc = glGetUniformLocation(shaderProgram, "lightColor");
-	unsigned int lightPosLoc = glGetUniformLocation(shaderProgram, "lightPos");
-	unsigned int objectColorLoc = glGetUniformLocation(shaderProgram, "objectColor");
+	unsigned int viewLoc= glGetUniformLocation(viewport_settings->render_settings->shader_program, "view");
+	unsigned int projectionLoc= glGetUniformLocation(viewport_settings->render_settings->shader_program, "projection");
+	unsigned int lightColorLoc = glGetUniformLocation(viewport_settings->render_settings->shader_program, "lightColor");
+	unsigned int lightPosLoc = glGetUniformLocation(viewport_settings->render_settings->shader_program, "lightPos");
+	unsigned int objectColorLoc = glGetUniformLocation(viewport_settings->render_settings->shader_program, "objectColor");
 	glUniformMatrix4fv(viewLoc, 1, GL_FALSE, (float *)view);
 	glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, (float *)projection);
 	vec3 lightColor = {1.0f, 1.0f, 1.0f};
 	vec3 lightPos = {5.0f, 5.0f, 5.0f};
 	vec3 objectColor= {1.0f, 1.0f, 1.0f};
 	glUniform3f(lightColorLoc, 1.0f, 1.0f, 1.0f);
-	glUniform3f(lightPosLoc, ACTIVE_CAMERA.pos.x, ACTIVE_CAMERA.pos.y, ACTIVE_CAMERA.pos.z);//8.0f, 8.0f, 2.0f);
+	glUniform3f(lightPosLoc,currentActiveCam.pos.x, currentActiveCam.pos.y, currentActiveCam.pos.z);//8.0f, 8.0f, 2.0f);
 	glUniform3f(objectColorLoc, 1.0f, 0.5f, 0.3f);
 
 	//For everu object we draw it
@@ -303,11 +307,17 @@ void calculateFrameGPU(unsigned char * pixelData){
 
 	// glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
 	// -------------------------------------------------------------------------------
-	glfwSwapBuffers(window);
+	debug("Swapping buffers");
+	glfwSwapBuffers(viewport_settings->window);
+	//glfwSwapBuffers(window);
 	glfwPollEvents();
 	
+	debug("Returning data");
+	//sprintf( pixelData, "Hello there :)");
+	debug("x: %d, y: %d", viewport_settings->render_settings->screen_width, viewport_settings->render_settings->screen_height);
 	//Pass the image pixels
-	glReadPixels(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,GL_RGB, GL_UNSIGNED_BYTE, pixelData);
+	glReadPixels(0, 0, viewport_settings->render_settings->screen_width, viewport_settings->render_settings->screen_height, GL_RGB, GL_UNSIGNED_BYTE, pixelData);
+	debug("Data returned");
 }
 
 //Function that reads and sets up the fragment sharder
@@ -463,7 +473,7 @@ int loadModelGPU(Object * modelToLoad){
 	debug("Vertices insertados: %d", sizeof(vertices));
 	//polygonCount = 1;
 	//The FBO and RBO should be outside this function
-	unsigned int VAO, VBO, FBO;
+	unsigned int VAO, VBO;
 	glGenVertexArrays(1, &VAO);
 	glGenBuffers(1, &VBO);
 	//glGenBuffers(1, &EBO);

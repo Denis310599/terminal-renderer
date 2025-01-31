@@ -16,7 +16,7 @@
 #include "../lib/lpng1644/png.h"
 
 void postProcessFrameToChar(Pixel * frameBuffer, char * output);
-void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in);
+void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in, ViewportSettings * viewport_settins);
 void importStl(char * path, Vector3d scale, Vector3d pos);
 void encode_png(unsigned char* raw_data, int width, int height);
 char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen);
@@ -42,39 +42,68 @@ void create_viewport(ViewportSettings * viewportSettings){
 	viewportSettings->y = 0;
 	viewportSettings->screen_width = 600;
 	viewportSettings->screen_height = 400;
-	viewportSettings->is_viewport = 0;
+	viewportSettings->is_viewport = 1;
 	viewportSettings->render_settings = renderSettings;
+	viewportSettings->is_char_printed = 0;
 }
 
 void init_viewport(ViewportSettings * viewportSettings){
 	//Initiates openGL
 	if(viewportSettings->render_settings->gpu_mode){
-		GLFWwindow * window = setUpOpenGL(viewportSettings);
+		viewportSettings->window = setUpOpenGL(viewportSettings);
 	}
 
 
 	Pixel * frameBuffer = malloc(viewportSettings->screen_width*viewportSettings->screen_height*sizeof(Pixel));//[SCREEN_WIDTH*SCREEN_HEIGHT];
 	unsigned char *pixelDataBuffer = (unsigned char *) malloc(viewportSettings->screen_width*viewportSettings->screen_height*3*sizeof(char));
 
+	Pixel ** frameBufferPtr = malloc(sizeof(Pixel *));
+	*frameBufferPtr = frameBuffer;
+
+	unsigned char ** pixelDataBufferPtr = malloc(sizeof(unsigned char *));
+	*pixelDataBufferPtr = pixelDataBuffer;
+
 	//I dont know if this will fail, don't know if this address won't be accessed by other part of the program
-	viewportSettings->pixel_data_buffer = &frameBuffer;
-	viewportSettings->gpu_frame_buffer = &pixelDataBuffer;
+	//spoiler: it failed, but i fixed it
+	viewportSettings->pixel_data_buffer = frameBufferPtr;
+	viewportSettings->gpu_frame_buffer = pixelDataBufferPtr;
 
 	
 }
 
 /*Function that renders a frame in a viewport*/
 void render_viewport(ViewportSettings * viewportSettings){
-	//Orders to render a new frame with
+	//Orders to render a new frame
 	if(viewportSettings->render_settings->gpu_mode){
+		//printf("%s", *(viewportSettings->gpu_frame_buffer));
 		calculateFrameGPU(viewportSettings, *(viewportSettings->gpu_frame_buffer));
 	}else{
 		renderFrame(*(viewportSettings->pixel_data_buffer));
 	}
 
-	//Shows in the renderer
-	printFrameGP(*(viewportSettings->pixel_data_buffer),*(viewportSettings->gpu_frame_buffer));
-	
+	//Move cursor to location and prints
+	//printf("Moving cursor\n");
+	//printf("\033[0;0H");
+	fflush(stdout);
+	char moveCursor[] = "123[200;200H";
+	//printf("%d\n",viewportSettings->x);
+	//printf("%d\n",viewportSettings->y);
+	fflush(stdout);
+	sprintf((char *) moveCursor, "\033[%d;%dH", viewportSettings->x, viewportSettings->y);
+	printf("%s",moveCursor);
+	fflush(stdout);
+
+	//printf("Printing viewport\n");
+	//fflush(stdout);
+
+	//Shows in the viewport
+	if(viewportSettings->is_char_printed == 1){
+		char * output = malloc(sizeof(char)*(((viewportSettings->screen_width+1)*viewportSettings->screen_height)+ 10));
+		postProcessFrameToChar(*(viewportSettings->pixel_data_buffer),output);
+		printf("%s\n", output);
+	}else{
+		printFrameGP(*(viewportSettings->pixel_data_buffer),*(viewportSettings->gpu_frame_buffer), viewportSettings);
+	}
 	//In case we want to render this to char
   //char * output = malloc(sizeof(char)*(((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10));//;[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10];
 	//postProcessFrameToChar(frameBuffer,output);
@@ -83,7 +112,6 @@ void render_viewport(ViewportSettings * viewportSettings){
 
 }
 
-//TODO: Crear inicializador y configurador de render settings
 
 int main(){
 	//return 0;
@@ -108,7 +136,17 @@ int main(){
 	viewport.screen_width = 1280;
 	viewport.screen_height = 720;
 	viewport.render_settings = &renderSettings;
-	GLFWwindow * window = setUpOpenGL(&viewport);
+	viewport.y = 10;
+	viewport.x = 10;
+
+	printf("Creating viewport\n");
+	create_viewport(&viewport);
+	printf("Initializing viewport\n");
+	init_viewport(&viewport);
+	viewport.x = 5;
+	viewport.y = 5;
+	//GLFWwindow * window = setUpOpenGL(&viewport);
+	//viewport.window = window;
 	//getchar();
 	
 	importStl("../assets/eevee2.stl", (Vector3d){0.03f, 0.03f, 0.03f}, (Vector3d){-130, 214, 0});
@@ -167,6 +205,11 @@ int main(){
 	unsigned char *pixelDataBuffer = (unsigned char *) malloc(SCREEN_WIDTH*SCREEN_HEIGHT*3*sizeof(char));
   char * output = malloc(sizeof(char)*(((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10));//;[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10];
 
+	//pixelDataBuffer = NULL;
+	//viewport.gpu_frame_buffer = &pixelDataBuffer;
+	//viewport.pixel_data_buffer = &frameBuffer;
+	viewport.is_char_printed = 0;
+
 	//Time metrics
 	clock_t tOld = clock();
 	clock_t tNew = clock();
@@ -179,30 +222,31 @@ int main(){
 	//renderFrame(frameBuffer);
 	
 	printf("\033[2J");
-	//while(1){
-	while(!glfwWindowShouldClose(window)){
-		if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS){
-			glfwSetWindowShouldClose(window, 1);
-		}
+	while(1){
+	//while(!glfwWindowShouldClose(window)){
+	//	if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS){
+	//		glfwSetWindowShouldClose(window, 1);
+	//	}
 
 
 		//Calculate position of the objects in the scene (in this case the camera)
 		cameraRotationQuaternion = newQuat((Vector3d) {0, 0, 1}, angularSpeed * dt);
 		ACTIVE_CAMERA.pos = vect_rot(ACTIVE_CAMERA.pos, cameraRotationQuaternion);
 		ACTIVE_CAMERA.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, ACTIVE_CAMERA.pos, -1));
-		renderSettings.active_camera = ACTIVE_CAMERA;
+		viewport.render_settings->active_camera = ACTIVE_CAMERA;
 		//printf("Active Dir: x %f y %f z %f\n", ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z);
 		//Render the frame
-		calculateFrameGPU(&viewport ,pixelDataBuffer);
+		//calculateFrameGPU(&viewport ,pixelDataBuffer);
 		//renderFrame(frameBuffer);
-		printFrameGP(frameBuffer, pixelDataBuffer);
-
+		//printFrameGP(frameBuffer, pixelDataBuffer, &viewport);
+		render_viewport(&viewport);
 		//printFrameGP(frameBuffer, NULL);
 		//postProcessFrameToChar(frameBuffer,output);
 		//printf("%s\n", output);
 		
 		//Calculate metrics
-		//printf("\033[2J");
+		printf("\033[0;0H");
+		fflush(stdout);
 		printf("%2f FPS\n", fps);
 		tNew = clock();
 		dt = ((double)(tNew-tOld))/CLOCKS_PER_SEC;
@@ -333,11 +377,11 @@ void importStl(char * path, Vector3d scale, Vector3d pos){
 }
 
 /*This function renders an image in the terminal using the graphic protocol*/
-void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
+void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in, ViewportSettings * viewport_settins){
 	//Create the header
 	//char headerMsg[] = "\033_Ga=T,i=1,m=%d,x=1234,y=1234,c=1,f=24,s=12345,v=12345,q=1;\033\\";
 	//char headerMsg2[] = "\033_Gm=12345;\033\\";
-	long int pixelCount = SCREEN_WIDTH*SCREEN_HEIGHT;
+	long int pixelCount = viewport_settins->screen_width*viewport_settins->screen_height;
 	unsigned char * pixelData;// = malloc(sizeof(unsigned char)*pixelCount*3);
 	size_t payloadToRead = 0;
 	//char * payload; 
@@ -364,16 +408,16 @@ void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
 	//payload = base64_encode(pixelData, pixelCount*3, &output_length);
 	//const char * imagePath = "/home/denis/cosasMias/Proyectos/terminal-renderer/build/output.png";
 	//unsigned char imagePath2[] = "/home/denis/cosasMias/Proyectos/terminal-renderer/build/output.png";
-	encode_png(pixelData, SCREEN_WIDTH, SCREEN_HEIGHT);
+	encode_png(pixelData, viewport_settins->screen_width,viewport_settins->screen_height);
 	//payload = base64_encode(SHM_NAME, strlen(	SHM_NAME), &output_length);
 	//Montamos las cabeceras
 	FRAME_BUFFER_INDEX = !FRAME_BUFFER_INDEX;
 	m = (output_length>4096)? 1 : 0;
 	//m=1;
-	//sprintf((char *) headerMsg, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	//sprintf((char *) headerMsg, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, viewport_settins->screen_width, SCREEN_HEIGHT);
 	//sprintf((char *) headerMsg2, "\033_Gm=1;\033\\");
-	printf("\x1b[%d;%dH", 10, 20);
-	//sprintf((char *) printBuffer, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, SCREEN_WIDTH, SCREEN_HEIGHT);
+	//printf("\x1b[%d;%dH", 10, 20);
+	//sprintf((char *) printBuffer, "\033_Ga=T,i=%d,m=%d,f=24,s=%d,v=%d,q=2;\033\\",FRAME_BUFFER_INDEX+1, m, viewport_settins->screen_width, SCREEN_HEIGHT);
 	//puts(headerMsg);
 	
 	//printf("%d\n", (int) output_length);
@@ -399,6 +443,7 @@ void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
 		//printf("\n");
 		//fwrite(&test[1], sizeof(char), 2, stdout);
 		//puts("\033\\");
+		//
 		fwrite("\033\\", 1, 2, stdout);
 		offset +=payloadToRead;
 		output_length-=payloadToRead;
@@ -413,7 +458,7 @@ void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in){
 	//free(pixelData);
 	printf("\033_Ga=d,d=i,i=%d\033\\",!FRAME_BUFFER_INDEX+1);
 	//fflush(stdout);
-	printf("\x1b[%d;%dH", 8, 20);
+	//printf("\x1b[%d;%dH", 8, 20);
 	//getchar();
 }
 
