@@ -45,6 +45,7 @@ typedef struct Poligono{
 
 typedef struct Mesh{
 	int n_polygon;
+	unsigned int VAO;
 	Polygon polygons[];
 } Mesh;
 
@@ -59,6 +60,9 @@ typedef struct Object{
 		Mesh * p_malla;
 	};
 	int id;
+	Vector3d pos;
+	Vector3d scale;
+	Vector3d rot;
 } Object;
 
 
@@ -84,7 +88,6 @@ typedef struct LightListItem{
 	struct LightListItem * next;
 } LightListNode;
 
-
 typedef struct Pixel{
 	int r;
 	int g;
@@ -92,6 +95,34 @@ typedef struct Pixel{
 } Pixel;
 
 
+//################ Render settings #################
+typedef struct RenderSettings{
+	int gpu_mode;
+	double front_clip;
+	int color_mode;
+	int preview_renderer;
+	Camera active_camera;
+	int screen_height;
+	int screen_width;
+	int fps;
+	int fast_light;
+	unsigned int shader_program;
+	char ** shared_memory_name;
+} RenderSettings;
+
+typedef struct ViewportSettings{
+	int id;
+	int x;
+	int y;
+	int screen_height;
+	int screen_width;
+	RenderSettings * render_settings;
+	int is_viewport;
+	GLFWwindow * window;
+	Pixel ** pixel_data_buffer;
+	unsigned char ** gpu_frame_buffer;
+	int is_char_printed;
+} ViewportSettings;
 
 //Global variables
 extern double FPS;
@@ -109,9 +140,9 @@ extern double PIXEL_RESOL;
 
 //Method definitions
 void renderFrame(Pixel * frameBuffer);
-void calculateFrameGPU(unsigned char * pixelData);
+void calculateFrameGPU(ViewportSettings* viewport_settings, unsigned char * pixelData);
 void initRenderer();
-GLFWwindow * setUpOpenGL();
+GLFWwindow * setUpOpenGL(ViewportSettings * viewport_settings);
 
 int addLight(Light light);
 int getLight(int id, Light * light);

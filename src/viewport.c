@@ -14,6 +14,7 @@
 #include <GLFW/glfw3.h>
 
 #include "../lib/lpng1644/png.h"
+#include "../include/viewport.h"
 
 void postProcessFrameToChar(Pixel * frameBuffer, char * output);
 void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in, ViewportSettings * viewport_settins);
@@ -28,15 +29,20 @@ int FRAME_BUFFER_INDEX = 0;
 
 char * payload; 
 size_t output_length;
+float fps;
+float delta_time;
+float time_old;
+float time_new;
 
 /*Function that creates a new viewport object*/
-void create_viewport(ViewportSettings * viewportSettings){
+void vp_create_viewport(ViewportSettings * viewportSettings){
 	RenderSettings * renderSettings = malloc(sizeof(RenderSettings));
 	renderSettings->gpu_mode = 1;
 	renderSettings->front_clip = 0.1;
 	renderSettings->color_mode = 1;
 	renderSettings->screen_width = 600;
 	renderSettings->screen_height = 400;
+	renderSettings->fast_light = 1;
 
 	viewportSettings->x = 0;
 	viewportSettings->y = 0;
@@ -47,7 +53,7 @@ void create_viewport(ViewportSettings * viewportSettings){
 	viewportSettings->is_char_printed = 0;
 }
 
-void init_viewport(ViewportSettings * viewportSettings){
+void vp_init_viewport(ViewportSettings * viewportSettings){
 	//Initiates openGL
 	if(viewportSettings->render_settings->gpu_mode){
 		viewportSettings->window = setUpOpenGL(viewportSettings);
@@ -68,11 +74,17 @@ void init_viewport(ViewportSettings * viewportSettings){
 	viewportSettings->pixel_data_buffer = frameBufferPtr;
 	viewportSettings->gpu_frame_buffer = pixelDataBufferPtr;
 
+	//Set up global variables
+	if(viewportSettings->render_settings->gpu_mode == 1){
+		GPU_MODE = 1;
+	}
+	payload = base64_encode(SHM_NAME, strlen(	SHM_NAME), &output_length);
+
 	
 }
 
 /*Function that renders a frame in a viewport*/
-void render_viewport(ViewportSettings * viewportSettings){
+void vp_render_viewport(ViewportSettings * viewportSettings){
 	//Orders to render a new frame
 	if(viewportSettings->render_settings->gpu_mode){
 		//printf("%s", *(viewportSettings->gpu_frame_buffer));
@@ -109,150 +121,13 @@ void render_viewport(ViewportSettings * viewportSettings){
 	//postProcessFrameToChar(frameBuffer,output);
 	//printf("%s\n", output);
 
-
-}
-
-
-int main(){
-	//return 0;
-	DEBUG = 0;
-	//Set up the renderer
-	printf("Starting...\n");
-	payload = base64_encode(SHM_NAME, strlen(	SHM_NAME), &output_length);
-	initRenderer();
-	SCREEN_WIDTH=1280;
-	SCREEN_HEIGHT=720;
-	PIXEL_RESOL = 1;
-	GPU_MODE = 1;
-
-	//Define the objects
-	RenderSettings renderSettings;
-	renderSettings.gpu_mode = 1;
-	renderSettings.front_clip = 0.1;
-	renderSettings.color_mode = 1;
-	renderSettings.screen_width = 1280;
-	renderSettings.screen_height = 720;
-	ViewportSettings viewport;
-	viewport.screen_width = 1280;
-	viewport.screen_height = 720;
-	viewport.render_settings = &renderSettings;
-	viewport.y = 10;
-	viewport.x = 10;
-
-	printf("Creating viewport\n");
-	create_viewport(&viewport);
-	printf("Initializing viewport\n");
-	init_viewport(&viewport);
-	viewport.x = 5;
-	viewport.y = 5;
-	//GLFWwindow * window = setUpOpenGL(&viewport);
-	//viewport.window = window;
-	//getchar();
-	
-	importStl("../assets/eevee2.stl", (Vector3d){0.03f, 0.03f, 0.03f}, (Vector3d){-130, 214, 0});
-	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 0, 0});
-	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 10, 0});
-	//return 0;
-
-	Object cubeObj;
-	cubeObj.tipo = Cubo;
-	Cube myCube = {{0, 0, 0}, {2, 2, 2}, {3.141592/4, 0, 3.141592/4}};
-	cubeObj.cubo = myCube;
-
-	Object planeObj;
-	planeObj.tipo = Plano;
-	Plane myPlane = {(Vector3d){0, 0, 0}, (Vector3d){0, 0, 1}};
-	planeObj.plano = myPlane;
-	//addObject(planeObj);
-	addObject(cubeObj);
-	myCube.pos = (Vector3d){0, 6, 0};
-	myCube.escala = (Vector3d){0.5, 0.5, 0.5};
-	myCube.rotacion = (Vector3d){0, 0, 0};
-	cubeObj.cubo = myCube;
-	addObject(cubeObj);
-
-	//Define the lights
-	Light light;
-	light.tipo = point;
-	light.pos = (Vector3d){0, 60, 60};
-	light.shadow = 0;
-	light.intensidad=40;
-	addLight(light);
-	light.tipo = point;
-	light.pos = (Vector3d){25, -25, 30};
-	light.shadow = 0;
-	light.intensidad=30;
-	addLight(light);
-	light.pos = (Vector3d){-25, -30, 30};
-	light.intensidad=20;
-	addLight(light);
-
-
-	//Define the camera
-	Camera myCam;
-	//myCam.pos = (Vector3d){15, 0, 8};
-	//myCam.pos = (Vector3d){70, 0, 50};
-	myCam.pos = (Vector3d){10, 0, 3};
-	myCam.dir = (Vector3d){2, 0, 3};
-	myCam.fov = 45;
-	
-	ACTIVE_CAMERA = myCam;
-	renderSettings.active_camera = myCam;
-	FAST_LIGHT=0;
-
-	//Define the frame buffer
-	Pixel * frameBuffer = malloc(SCREEN_WIDTH*SCREEN_HEIGHT*sizeof(Pixel));//[SCREEN_WIDTH*SCREEN_HEIGHT];
-	unsigned char *pixelDataBuffer = (unsigned char *) malloc(SCREEN_WIDTH*SCREEN_HEIGHT*3*sizeof(char));
-  char * output = malloc(sizeof(char)*(((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10));//;[((SCREEN_WIDTH + 1) * SCREEN_HEIGHT) + 10];
-
-	//pixelDataBuffer = NULL;
-	//viewport.gpu_frame_buffer = &pixelDataBuffer;
-	//viewport.pixel_data_buffer = &frameBuffer;
-	viewport.is_char_printed = 0;
-
-	//Time metrics
-	clock_t tOld = clock();
-	clock_t tNew = clock();
-	double dt = 0;
-	double fps;
-
-	//Animation items
-	Quaternion cameraRotationQuaternion;
-	double angularSpeed = deg2rad(360)/10;
-	//renderFrame(frameBuffer);
-	
-	printf("\033[2J");
-	while(1){
-	//while(!glfwWindowShouldClose(window)){
-	//	if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS){
-	//		glfwSetWindowShouldClose(window, 1);
-	//	}
-
-
-		//Calculate position of the objects in the scene (in this case the camera)
-		cameraRotationQuaternion = newQuat((Vector3d) {0, 0, 1}, angularSpeed * dt);
-		ACTIVE_CAMERA.pos = vect_rot(ACTIVE_CAMERA.pos, cameraRotationQuaternion);
-		ACTIVE_CAMERA.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, ACTIVE_CAMERA.pos, -1));
-		viewport.render_settings->active_camera = ACTIVE_CAMERA;
-		//printf("Active Dir: x %f y %f z %f\n", ACTIVE_CAMERA.dir.x, ACTIVE_CAMERA.dir.y, ACTIVE_CAMERA.dir.z);
-		//Render the frame
-		//calculateFrameGPU(&viewport ,pixelDataBuffer);
-		//renderFrame(frameBuffer);
-		//printFrameGP(frameBuffer, pixelDataBuffer, &viewport);
-		render_viewport(&viewport);
-		//printFrameGP(frameBuffer, NULL);
-		//postProcessFrameToChar(frameBuffer,output);
-		//printf("%s\n", output);
-		
-		//Calculate metrics
-		printf("\033[0;0H");
-		fflush(stdout);
-		printf("%2f FPS\n", fps);
-		tNew = clock();
-		dt = ((double)(tNew-tOld))/CLOCKS_PER_SEC;
-		fps = (double)1.0 /dt;
-		tOld = tNew;
-	}
+	time_new = clock();
+	delta_time =  ((double)(time_new-time_old))/CLOCKS_PER_SEC;
+	fps = (double) 1.0/ delta_time;
+	time_old = time_new;
+	printf("%s",moveCursor);
+	fflush(stdout);
+	printf("FPS %2f", fps);
 }
 
 
@@ -421,7 +296,7 @@ void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in, ViewportSetting
 	//puts(headerMsg);
 	
 	//printf("%d\n", (int) output_length);
-	printf("\033_Ga=T,t=s,i=%d,f=100,q=2;",FRAME_BUFFER_INDEX+1);
+	printf("\033_Ga=T,t=s,i=%d,f=100,q=2,z=-1;",FRAME_BUFFER_INDEX+1);
 	fflush(stdout);	
 	fwrite(&payload[0], sizeof(char), (int) output_length, stdout);
 	printf("\033\\");
