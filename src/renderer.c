@@ -59,16 +59,29 @@ struct Vector3d vectProjectionIntoPlane(struct Vector3d point, struct Vector3d o
 */
 
 int DEBUG =0;
+int debug_lock = 1;
+FILE *debugFile;
+
 void debug(char *  msg, ...){
 
 	va_list argPtr;
-	va_start(argPtr, msg);
 	if(DEBUG){
-		printf("[DEBUG]");
-		vprintf(msg, argPtr);
-		printf("\n");
+		//printf("[DEBUG]");
+		//vprintf(msg, argPtr);
+		//printf("\n");
+		if(debug_lock == 1){
+			debug_lock = 0;
+			debugFile = fopen("/dev/pts/2", "w");
+		}
+		va_start(argPtr, msg);
+		fprintf(debugFile, "[BEBUG]");
+		//fprintf(debugFile, "%d\n", 1);
+		//vfprintf(FILE *, const char *, struct __va_list_tag *)
+		vfprintf(debugFile, msg, argPtr);
+		fprintf(debugFile, "\n");
+		//fclose(debugFile);
+		va_end(argPtr);
 	}
-	va_end(argPtr);
 }
 
 //Funciones correspondiente con el objeto a renderizar
