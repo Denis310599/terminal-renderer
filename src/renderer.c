@@ -71,7 +71,7 @@ void debug(char *  msg, ...){
 		//printf("\n");
 		if(debug_lock == 1){
 			debug_lock = 0;
-			debugFile = fopen("/dev/pts/2", "w");
+			debugFile = fopen("/dev/pts/1", "w");
 		}
 		va_start(argPtr, msg);
 		fprintf(debugFile, "[BEBUG]");

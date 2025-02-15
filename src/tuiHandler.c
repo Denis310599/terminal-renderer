@@ -107,7 +107,9 @@ void drawViewport();
 void mark_component_as_updated(Component * component);
 void handle_resize();
 
-void calculateComponentDimensions(Component * component, Component * parent, int mode);
+void calculateComponentDimensions(Component * component, Component * parent);
+void calculateComponentDimensionsWidth(Component * component, Component * parent);
+void calculateComponentDimensionsHeight(Component * component, Component * parent);
 
 Component * newContainer();
 Color * newColor(uint8_t r, uint8_t g, uint8_t b);
@@ -129,6 +131,7 @@ Component parentComponent;
 const Color BG_COLOR = (Color){7, 18, 36};
 const Color FONT_COLOR= (Color){173, 173, 173};
 const Color BG_2_COLOR= (Color){29, 42, 64};
+const Color BG_VP_COLOR= (Color){60, 60, 60};
 int main(){
 	DEBUG=1;
   initUI();
@@ -177,86 +180,105 @@ void initUI(){
   int rows, cols;
   get_terminal_size(&rows, &cols);
   parentComponent.height = rows;
-  parentComponent.width = cols-1;
-  parentComponent.real_width= cols-1;
+  parentComponent.width = cols;
+  parentComponent.real_width= cols;
   parentComponent.isUpdated = 3;
-  parentComponent.childCount = 4;
+  parentComponent.childCount = 6;
 	parentComponent.component_type = container_t;
 	parentComponent.backgroundColor = BG_COLOR;
-	parentComponent.border = 1;
+	parentComponent.border = 0;
 	parentComponent.padding = 0;
 
-	parentComponent.children = malloc(2*sizeof(Component *));
-	parentComponent.children[0] = newContainer();
-	parentComponent.children[0]->topToTopOf = &parentComponent;
-	//parentComponent.children[0]->bottomToBottomOf = &parentComponent;
-	parentComponent.children[0]->height = 10;
-	parentComponent.children[0]->real_width = 20;
-	parentComponent.children[0]->x= 5;
-	parentComponent.children[0]->autoHeight = 0;
-	
-	parentComponent.children[2] = newContainer();
-	//parentComponent.children[2]->topToBottomOf=parentComponent.children[0];
-	parentComponent.children[2]->bottomToBottomOf = &parentComponent;
-	parentComponent.children[2]->height = 10;
-	parentComponent.children[2]->real_width = 10;
-	parentComponent.children[2]->x= 5;
-	parentComponent.children[2]->autoHeight = 0;
+	/*Commands bar container*/
+	Component * child = newContainer();
+	child->bottomToBottomOf= &parentComponent;
+	child->marginTop = 0;
+	child->startToStartOf = &parentComponent;
+	child->endToEndOf= &parentComponent;
+	child->height = 2;
+	//child->real_width = 3;
+	child->autoWidth = 2;
+	child->width = 10;
+	child->backgroundColor = BG_COLOR;
+	child->border = 0;
 
-	//parentComponent.children = malloc(1*sizeof(Component *));
-	parentComponent.children[1] = newContainer();
-	parentComponent.children[1]->topToBottomOf=parentComponent.children[0];
-	parentComponent.children[1]->bottomToTopOf = parentComponent.children[2];
-	parentComponent.children[1]->height = 10;
-	parentComponent.children[1]->real_width = 10;
-	parentComponent.children[1]->x= 16;
-	parentComponent.children[1]->autoHeight = 2;
+	parentComponent.children = malloc(6*sizeof(Component *));
+	parentComponent.children[0] = child;
+
+	/*Status bar container*/
+	child = newContainer();
+	child->bottomToTopOf= parentComponent.children[0];
+	child->startToStartOf = &parentComponent;
+	child->endToEndOf= &parentComponent;
+	child->height = 1;
+	//child->real_width = 3;
+	child->autoWidth = 2;
+	child->backgroundColor = BG_2_COLOR;
+	child->border = 0;
+
+	parentComponent.children[1] = child;
+
+	/*Top Menu container*/
+	child = newContainer();
+	child->topToTopOf= &parentComponent;
+	child->startToStartOf = &parentComponent;
+	child->endToEndOf= &parentComponent;
+	child->height = 3;
+	//child->real_width = 3;
+	child->autoWidth = 2;
+	child->backgroundColor = BG_COLOR;
+	child->border = 1;
+
+	parentComponent.children[2] = child;
+
+	/*Object container*/
+	child = newContainer();
+	child->topToBottomOf= parentComponent.children[2];
+	child->bottomToTopOf= parentComponent.children[1];
+	child->startToStartOf = &parentComponent;
+	child->endToEndOf= &parentComponent;
+	//child->height = 3;
+	//child->real_width = 3;
+	child->autoWidth = 2;
+	child->autoHeight = 2;
+	child->widthBias = 0.3;
+	child->xBias = 1;
+	child->backgroundColor = BG_COLOR;
+	child->border = 1;
+
+	parentComponent.children[3] = child;
+
+	/*Main buttons container*/
+	child = newContainer();
+	child->topToBottomOf= parentComponent.children[2];
+	child->startToStartOf = &parentComponent;
+	child->endToStartOf= parentComponent.children[3];
+	child->height = 5;
+	//child->real_width = 3;
+	child->autoWidth = 2;
+	child->autoHeight = 0;
+	child->backgroundColor = BG_2_COLOR;
+	child->border = 0;
+
+	parentComponent.children[4] = child;
+
+	/*viewport container*/
+	child = newContainer();
+	child->topToBottomOf= parentComponent.children[4];
+	child->startToStartOf = &parentComponent;
+	child->endToStartOf= parentComponent.children[3];
+	child->bottomToTopOf = parentComponent.children[1];
+	//child->height = 5;
+	//child->real_width = 3;
+	child->autoWidth = 2;
+	child->autoHeight = 2;
+	child->backgroundColor = BG_VP_COLOR;
+	child->border = 1;
+
+	parentComponent.children[5] = child;
 
 
-  Component * contChild = newContainer();
-	contChild->childCount = 1;
-	contChild->x = 50;
-	contChild->autoHeight = 2;
-	contChild->height = 10;
-	contChild->real_width = 10;
-	contChild->backgroundColor = BG_2_COLOR;
-	contChild->border = 0;
-	//contChild->marginTop = 5;
-	contChild->topToTopOf = &parentComponent;//parentComponent.children[0];
-	contChild->bottomToBottomOf = &parentComponent;// parentComponent.children[2];
-	contChild->yBias = 0.3f;
-	contChild->heightBias = 0.5f;
-	parentComponent.children[3] = contChild;
-
-	contChild->children = malloc(1*sizeof(Component *));
-	Component * contChild2 = newContainer();
-	contChild2->childCount = 0;
-	contChild2->x = 2;
-	contChild2->autoHeight = 0;
-	contChild2->real_width = 3;
-	contChild2->marginTop=2;
-	contChild2->marginBot=3;
-	contChild->children[0] = contChild2;
-	//contChild2->to
-
-
-
-	/*parentComponent.children[1] = newContainer();
-	parentComponent.children[1]->bottomToBottomOf= &parentComponent;
-	parentComponent.children[1]->height = 3;
-	parentComponent.children[1]->real_width = 5;
-	parentComponent.children[1]->x= 5;
-
-	parentComponent.children[2] = newContainer();
-	parentComponent.children[2]->topToBottomOf= parentComponent.children[0];
-	parentComponent.children[2]->bottomToTopOf= parentComponent.children[1];
-	parentComponent.children[2]->autoHeight = 0;
-	parentComponent.children[2]->height = 3;
-	parentComponent.children[2]->real_width = 5;
-	parentComponent.children[2]->x= 5;
-	*/
-
-}
+	}
 
 void prepareTerminal(){
   //Swaps buffer
@@ -286,13 +308,14 @@ void handle_resize(){
 	int rows, cols;
   get_terminal_size(&rows, &cols);
   parentComponent.height = rows;
-  parentComponent.width = cols-1;
-  parentComponent.real_width= cols-1;
+  parentComponent.width = cols;
+  parentComponent.real_width= cols;
 
 }
 
 void mark_component_as_updated(Component * component){
 	component->real_height = -1;
+	component->real_width = -1;
 	component->isUpdated = 3;
 
 	for(int i = 0; i<component->childCount; i++){
@@ -392,7 +415,7 @@ void drawContainer(Component * component, Component * parent){
 }
 
 void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor, Color borderColor){
-  int true_x = x;
+  int true_x = x+1;
   int true_y = y+1;
   int true_end_x = x+width;
   int true_end_y = y+height;
@@ -445,13 +468,19 @@ void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
   }
 }
 void drawUI(){
-	calculateComponentDimensions(&parentComponent, &parentComponent, 0);
+	calculateComponentDimensions(&parentComponent, &parentComponent);
   drawComponent(&parentComponent, NULL);
 }
 
-/*Function that calculates and populates the dimensions and positions of a component*/
-/*Mode: 0 height, 1 width*/
-void calculateComponentDimensions(Component * component, Component * parent, int mode){
+/*Function that calculates component dimensions and populates its properties*/
+void calculateComponentDimensions(Component * component, Component * parent){
+	calculateComponentDimensionsWidth(component, parent);
+	calculateComponentDimensionsHeight(component, parent);
+}
+
+/*Function that calculates and populates the dimensions and positions of a component y coordinate*/
+void calculateComponentDimensionsHeight(Component * component, Component * parent){
+
 	debug("Calculando componente con id %d", parent);
 	//Skips this one if it's position depends on his parent height and it's not yet been calculated
 	if(parent->real_height == 0 && (component->topToBottomOf == parent || component->bottomToBottomOf == parent)) return;
@@ -474,7 +503,7 @@ void calculateComponentDimensions(Component * component, Component * parent, int
 			int maxHeight= 0;
 			for(int i = component->childCount - 1; i>=0; i--){
 				Component * child = component->children[i];
-				if(child->real_height == -1)	calculateComponentDimensions(child, component, 0);
+				if(child->real_height == -1)	calculateComponentDimensionsHeight(child, component);
 				int auxMargin= 0;
 				auxMargin += child->marginBot == -1 ? child->margin : child->marginBot;	
 				auxHeight = child->y + child->real_height + auxMargin;
@@ -491,12 +520,12 @@ void calculateComponentDimensions(Component * component, Component * parent, int
 	//Top of component
 	if(component->topToTopOf != NULL && component->topToTopOf != parent){
 		if(component->topToTopOf->real_height == -1){
-			calculateComponentDimensions(component->topToTopOf, parent, 0);
+			calculateComponentDimensionsHeight(component->topToTopOf, parent);
 		}
 		min_y = component->topToTopOf->y + componentMarginTop;
 	}else if(component->topToBottomOf != NULL){
 		if(component->topToBottomOf->real_height == -1){
-			calculateComponentDimensions(component->topToBottomOf, parent, 0);
+			calculateComponentDimensionsHeight(component->topToBottomOf, parent);
 		}
 		if(component->topToBottomOf == parent){
 			min_y = component->topToBottomOf->real_height;
@@ -514,7 +543,7 @@ void calculateComponentDimensions(Component * component, Component * parent, int
 	//Bot of component
 	if(component->bottomToTopOf!= NULL){
 		if(component->bottomToTopOf->real_height == -1){
-			calculateComponentDimensions(component->bottomToTopOf, parent, 0);
+			calculateComponentDimensionsHeight(component->bottomToTopOf, parent);
 		}
 		int auxHeight;
 		if(component->bottomToTopOf == parent){
@@ -526,7 +555,7 @@ void calculateComponentDimensions(Component * component, Component * parent, int
 		max_y = auxHeight < 0 ? 0 : auxHeight;
 	}else if(component->bottomToBottomOf != NULL){
 		if(component->bottomToBottomOf->real_height == -1){
-			calculateComponentDimensions(component->bottomToBottomOf, parent, 0);
+			calculateComponentDimensionsHeight(component->bottomToBottomOf, parent);
 		}
 		
 		int auxHeight;
@@ -594,9 +623,160 @@ void calculateComponentDimensions(Component * component, Component * parent, int
 	//debug("Hijos: %d", 1);
 	for(int i = 0; i<component->childCount; i++){
 		debug("Calculando hijo %d al final", i);
-		if(component->children[i]->real_height == -1) calculateComponentDimensions(component->children[i], component, 0);
+		if(component->children[i]->real_height == -1) calculateComponentDimensionsHeight(component->children[i], component);
 	}
 }
+
+/*Function that calculates and populates the dimensions and positions of a component x coordinate*/
+void calculateComponentDimensionsWidth(Component * component, Component * parent){
+
+	debug("Calculando componente con id %d", parent);
+	//Skips this one if it's position depends on his parent height and it's not yet been calculated
+	if(parent->real_width== 0 && (component->startToEndOf== parent || component->endToEndOf== parent)) return;
+	//Calculates the dimensions
+	int componentMarginStart= component->marginStart== -1 ? component->margin : component->marginStart;
+	int componentMarginEnd= component->marginEnd== -1 ? component->margin : component->marginEnd;
+	int componentPaddingStart= parent->paddingStart== -1 ? parent->padding: parent->paddingStart;
+	int componentPaddingEnd= parent->paddingEnd== -1 ? parent->padding: parent->paddingEnd;
+	int min_x = -1;
+	int max_x = -1;
+
+	if(component == &parentComponent){
+		debug("Component is parent");
+		component->real_width= component->width;
+	}else if(component->autoWidth== 1){
+		debug("Height dependant on childs");
+			//Height dependant on children height
+			component->real_width= 0;
+			int auxHeight= 0;
+			int maxHeight= 0;
+			for(int i = component->childCount - 1; i>=0; i--){
+				Component * child = component->children[i];
+				if(child->real_height == -1)	calculateComponentDimensionsWidth(child, component);
+				int auxMargin= 0;
+				auxMargin += child->marginBot == -1 ? child->margin : child->marginBot;	
+				auxHeight = child->y + child->real_height + auxMargin;
+				maxHeight = maxHeight<auxHeight ? auxHeight : maxHeight;
+				maxHeight += componentPaddingEnd;
+			}
+			component->real_width= maxHeight;
+		debug("  Height: %d", maxHeight);
+	}else{
+		component->real_width= component->width;
+	}
+
+	//Calculate the max and min coords of location
+	//Top of component
+	if(component->startToStartOf!= NULL && component->startToStartOf!= parent){
+		if(component->startToStartOf->real_width== -1){
+			calculateComponentDimensionsWidth(component->startToStartOf, parent);
+		}
+		min_x= component->startToStartOf->y + componentMarginStart;
+	}else if(component->startToEndOf!= NULL){
+		if(component->startToEndOf->real_width== -1){
+			calculateComponentDimensionsWidth(component->startToEndOf, parent);
+		}
+		if(component->startToEndOf== parent){
+			min_x= component->startToEndOf->real_height;
+		}else{
+			min_x = component->startToEndOf->x+ component->startToEndOf->real_height+1;
+		}
+		min_x += componentMarginStart;
+	}else if(component->endToEndOf== NULL && component->endToEndOf== NULL || component->startToStartOf== parent){
+		//Default: topToTopOf: Parent
+		int parentPadding = parent->paddingStart!= -1 ? parent->paddingStart: parent->padding;
+		min_x = componentMarginStart + parentPadding;
+	}
+	debug("min_x = %d", min_x);
+
+	//Bot of component
+	if(component->endToStartOf!= NULL){
+		if(component->endToStartOf->real_width== -1){
+			calculateComponentDimensionsWidth(component->endToStartOf, parent);
+		}
+		int auxHeight;
+		if(component->endToStartOf== parent){
+			auxHeight = 0;
+		}else{
+			auxHeight=component->endToStartOf->x-1;
+		}
+		auxHeight -= componentMarginStart;
+		max_x = auxHeight < 0 ? 0 : auxHeight;
+	}else if(component->endToEndOf!= NULL){
+		if(component->endToEndOf->real_width== -1){
+			calculateComponentDimensionsWidth(component->endToEndOf, parent);
+		}
+		
+		int auxHeight;
+		if(component->endToEndOf== parent){
+			auxHeight = component->endToEndOf->real_width;
+		}else{
+			auxHeight = component->endToEndOf->x + component->endToEndOf->real_width;
+		}
+		auxHeight -= componentMarginEnd;
+		if(component->endToEndOf== parent){
+			int paddingParent = parent->paddingEnd == -1 ? parent->padding : parent->paddingEnd;
+			auxHeight -= paddingParent;
+		}
+		max_x= auxHeight < 0 ? 0 : auxHeight;
+	}else if(min_x!= -1){
+		//max_y = component->real_height + min_y;
+	}
+	debug("max_x = %d", max_x);
+
+	//Top not deffined but buttom is -> stick to bottom (Need to know the height)
+	//Bottom not deffinned but top is -> Stick to top (Need to know height)
+	//None of them deffined: Stick to top //Already did at top
+	
+	//Depending on the mode, we calculate the height and position of the object
+	if(component->autoWidth== 0 || component->autoWidth== 1){
+		//Top not deffined -> stick to bottom
+		if(min_x == -1){ 
+			//max_y -= componentMarginTop;
+			min_x = max_x - component->real_width;
+		}
+		
+		//Bot is not deffined -> stick to top
+		if(max_x == -1){ 
+			//min_y += componentMarginTop;
+			max_x = min_x + component->real_width;
+		}
+
+		//Both are deffined, we get the middle point (or biased)
+		float auxBias = component->xBias != -1 ? component->xBias*2 : 1;
+		if (component != &parentComponent) component->x = min_x + auxBias * (max_x-min_x-component->real_width)/2.0f;
+
+	}else if(component->autoWidth== 2){
+		//We set the top at the maximun, and also the max size
+		component->x = min_x;
+		//If some of them is not deffined, we assume it 0
+		if(max_x == -1 || min_x == -1) component->real_width= 0;
+		else component->real_width= max_x - min_x;
+
+		//Adjust size according to bias
+		
+		component->real_width*= component->widthBias!= -1 ? component->widthBias: 1; 
+		
+		//Both are deffined, we get the middle point (or biased)
+		float auxBias = component->xBias != -1 ? component->xBias*2 : 1;
+		if (component != &parentComponent) component->x = min_x + auxBias * (max_x-min_x-component->real_width)/2.0f;
+		//if (component != &parentComponent) component->y = middlePoint + component->real_height/2;
+
+
+	}
+	debug("Final width component %d: %d", parent, component->real_width);
+	debug("Final x component %d: %d", parent, component->x);
+
+	//Process the children that are not processed yet
+	debug("Numero hijos: %d", component->childCount);
+	//debug("Hijos: %d", 1);
+	for(int i = 0; i<component->childCount; i++){
+		debug("Calculando hijo %d al final", i);
+		if(component->children[i]->real_width== -1) calculateComponentDimensionsWidth(component->children[i], component);
+	}
+}
+
+
 
 /*Creates a new container*/
 Component * newContainer(){
@@ -604,13 +784,18 @@ Component * newContainer(){
 	cont->x = 0;
 	cont->y = 0;
 	cont->height = 5;
-	cont->height = 5;
+	cont->width= 5;
 	cont->autoHeight = 0;
+	cont->autoWidth = 0;
 	cont->margin = 0;
 	cont->marginBot = -1;
+	cont->marginStart = -1;
+	cont->marginEnd = -1;
 	cont->marginTop = -1;
 	cont->paddingTop = -1;
 	cont->paddingBot = -1;
+	cont->paddingStart = -1;
+	cont->paddingEnd = -1;
 	cont->padding = 0;
 	cont->component_type = container_t;
 	cont->childCount = 0;
@@ -619,8 +804,8 @@ Component * newContainer(){
 	cont->isUpdated = 3;
 	cont->backgroundColor = BG_COLOR;
 	cont->border = 1;
-	cont->xBias = 1;
-	cont->yBias = 1;
+	cont->xBias = -1;
+	cont->yBias = -1;
 	cont->heightBias = 1;
 	cont->widthBias = 1;
 
