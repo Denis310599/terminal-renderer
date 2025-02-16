@@ -108,6 +108,9 @@ typedef struct RenderSettings{
 	int fast_light;
 	unsigned int shader_program;
 	char ** shared_memory_name;
+	unsigned int RBO;
+	unsigned int depthRBO; 
+	unsigned int FBO;
 } RenderSettings;
 
 typedef struct ViewportSettings{
@@ -122,7 +125,7 @@ typedef struct ViewportSettings{
 	Pixel ** pixel_data_buffer;
 	unsigned char ** gpu_frame_buffer;
 	int is_char_printed;
-} ViewportSettings;
+	} ViewportSettings;
 
 //Global variables
 extern double FPS;
@@ -143,6 +146,7 @@ void renderFrame(Pixel * frameBuffer);
 void calculateFrameGPU(ViewportSettings* viewport_settings, unsigned char * pixelData);
 void initRenderer();
 GLFWwindow * setUpOpenGL(ViewportSettings * viewport_settings);
+void resizeWindow(ViewportSettings * viewport_settings);
 
 int addLight(Light light);
 int getLight(int id, Light * light);

@@ -101,11 +101,12 @@ void vp_render_viewport(ViewportSettings * viewportSettings){
 	//printf("%d\n",viewportSettings->x);
 	//printf("%d\n",viewportSettings->y);
 	fflush(stdout);
-	sprintf((char *) moveCursor, "\033[%d;%dH", viewportSettings->x, viewportSettings->y);
+	sprintf((char *) moveCursor, "\033[%d;%dH", viewportSettings->y+1, viewportSettings->x+1);
 	printf("%s",moveCursor);
 	fflush(stdout);
 
 	//printf("Printing viewport\n");
+	debug("Plotting image at %dx %dy", viewportSettings->x, viewportSettings->y);
 	//fflush(stdout);
 
 	//Shows in the viewport

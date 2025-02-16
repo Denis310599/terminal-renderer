@@ -71,7 +71,7 @@ void debug(char *  msg, ...){
 		//printf("\n");
 		if(debug_lock == 1){
 			debug_lock = 0;
-			debugFile = fopen("/dev/pts/1", "w");
+			debugFile = fopen("/dev/pts/2", "w");
 		}
 		va_start(argPtr, msg);
 		fprintf(debugFile, "[BEBUG]");
@@ -225,17 +225,17 @@ GLFWwindow * setUpOpenGL(ViewportSettings * viewport_settings){
 	viewport_settings->render_settings->shader_program = shaderProgram;
 
 	//Set up background buffer and depth testing
-	unsigned int RBO, depthRBO;
-	glGenRenderbuffers(1, &RBO);
-	glBindRenderbuffer(GL_RENDERBUFFER, RBO);
+	//unsigned int RBO, depthRBO;
+	glGenRenderbuffers(1, &(viewport_settings->render_settings->RBO));
+	glBindRenderbuffer(GL_RENDERBUFFER, viewport_settings->render_settings->RBO);
 
 	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, viewport_settings->screen_width, viewport_settings->screen_height);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, RBO);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, viewport_settings->render_settings->RBO);
 	
-	glGenRenderbuffers(1, &depthRBO);
-	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
+	glGenRenderbuffers(1, &(viewport_settings->render_settings->depthRBO));
+	glBindRenderbuffer(GL_RENDERBUFFER, viewport_settings->render_settings->depthRBO);
 	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, viewport_settings->screen_width, viewport_settings->screen_height);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, viewport_settings->render_settings->depthRBO);
 
 	glEnable(GL_DEPTH_TEST);
 
@@ -260,6 +260,68 @@ GLFWwindow * setUpOpenGL(ViewportSettings * viewport_settings){
 	return window;
 
 };
+
+void resizeWindow(ViewportSettings * viewport_settings){
+	debug("Resizing window. %dx %dy", viewport_settings->screen_width, viewport_settings->screen_height);
+	//glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, viewport_settings->screen_width, viewport_settings->screen_height);
+	//glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, viewport_settings->screen_width, viewport_settings->screen_height);
+	viewport_settings->render_settings->screen_height = viewport_settings->screen_height;
+	viewport_settings->render_settings->screen_width = viewport_settings->screen_width;
+
+	Pixel * frameBuffer = malloc(viewport_settings->screen_width*viewport_settings->screen_height*sizeof(Pixel));//[SCREEN_WIDTH*SCREEN_HEIGHT];
+	unsigned char *pixelDataBuffer = (unsigned char *) malloc(viewport_settings->screen_width*viewport_settings->screen_height*3*sizeof(char));
+
+	Pixel ** frameBufferPtr = malloc(sizeof(Pixel *));
+	*frameBufferPtr = frameBuffer;
+
+	unsigned char ** pixelDataBufferPtr = malloc(sizeof(unsigned char *));
+	*pixelDataBufferPtr = pixelDataBuffer;
+
+	//I dont know if this will fail, don't know if this address won't be accessed by other part of the program
+	//spoiler: it failed, but i fixed it
+	free(viewport_settings->pixel_data_buffer);
+	free(viewport_settings->gpu_frame_buffer);
+	viewport_settings->pixel_data_buffer = frameBufferPtr;
+	viewport_settings->gpu_frame_buffer = pixelDataBufferPtr;
+
+	//glfwPollEvents();
+	glfwSetWindowSize(viewport_settings->window,  viewport_settings->screen_width,  viewport_settings->screen_height);
+	//glViewport(0, 0, viewport_settings->screen_width, viewport_settings->screen_height);
+	
+	glDeleteFramebuffers(1, &(viewport_settings->render_settings->FBO));  // Missing in your code!
+	/*if(viewport_settings->render_settings->RBO)*/ glDeleteRenderbuffers(1, &(viewport_settings->render_settings->RBO));
+	/*if(viewport_settings->render_settings->depthRBO)*/ glDeleteRenderbuffers(1, &(viewport_settings->render_settings->depthRBO));
+
+
+	glGenFramebuffers(1, &(viewport_settings->render_settings->FBO));
+	glBindFramebuffer(GL_FRAMEBUFFER, viewport_settings->render_settings->FBO);
+
+	glGenRenderbuffers(1, &(viewport_settings->render_settings->RBO));
+	glBindRenderbuffer(GL_RENDERBUFFER, viewport_settings->render_settings->RBO);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, viewport_settings->screen_width, viewport_settings->screen_height);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, viewport_settings->render_settings->RBO);
+	
+	glGenRenderbuffers(1, &(viewport_settings->render_settings->depthRBO));
+	glBindRenderbuffer(GL_RENDERBUFFER, viewport_settings->render_settings->depthRBO);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, viewport_settings->screen_width, viewport_settings->screen_height);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, viewport_settings->render_settings->depthRBO);
+
+	//glEnable(GL_DEPTH_TEST);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	glViewport(0, 0, viewport_settings->screen_width, viewport_settings->screen_height);
+	glBindFramebuffer(GL_FRAMEBUFFER, viewport_settings->render_settings->FBO);
+	//glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	//glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);//glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	//int fbWidth, fbHeight;
+  //glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+	//debug("%dx %dy", fbWidth, fbHeight);
+	//glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	//int i = 0/0;
+}
 
 void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pixelData){
 

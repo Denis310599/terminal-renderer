@@ -1,3 +1,4 @@
+#include <asm-generic/ioctls.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
@@ -44,6 +45,8 @@ typedef struct Component{
 	enum ComponentType component_type;
   int x;
   int y;
+	int global_x;
+	int global_y;
   int height;
   int width;
 	int real_height;
@@ -91,7 +94,8 @@ typedef struct Component{
 
 	//Custom settings
   union{
-    Container properties;
+    Container container_properties;
+		Viewport viewport_properties;
   };
   int childCount;
   struct Component ** children;
@@ -103,7 +107,7 @@ void drawUI();
 void drawContainer(Component * component, Component * parent);
 void drawComponent(Component * component, Component * parent);
 void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor, Color borderColor);
-void drawViewport();
+void drawViewport(Component * component, Component * parent);
 void mark_component_as_updated(Component * component);
 void handle_resize();
 
@@ -112,6 +116,7 @@ void calculateComponentDimensionsWidth(Component * component, Component * parent
 void calculateComponentDimensionsHeight(Component * component, Component * parent);
 
 Component * newContainer();
+Component * newViewport();
 Color * newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
@@ -136,29 +141,21 @@ int main(){
 	DEBUG=1;
   initUI();
 	//getchar();
-  ViewportSettings viewport;
-  vp_create_viewport(&viewport);
-  vp_init_viewport(&viewport);
-  viewport.x = 5;
-  viewport.y = 5;
+  //ViewportSettings viewport;
+  //vp_create_viewport(&viewport);
+  //vp_init_viewport(&viewport);
+  //viewport.x = 5;
+  //viewport.y = 5;
 
   //Define the camera
-	Camera myCam;
-	//myCam.pos = (Vector3d){15, 0, 8};
-	//myCam.pos = (Vector3d){70, 0, 50};
-	myCam.pos = (Vector3d){10, 0, 3};
-	myCam.dir = (Vector3d){2, 0, 3};
-	myCam.fov = 45;
-	viewport.render_settings->active_camera = myCam;
-  importStl("../assets/eevee2.stl", (Vector3d){0.03f, 0.03f, 0.03f}, (Vector3d){-130, 214, 0});
+	importStl("../assets/eevee2.stl", (Vector3d){0.03f, 0.03f, 0.03f}, (Vector3d){-130, 214, 0});
 	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 0, 0});
 	importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3}, (Vector3d){0, 10, 0});
 
   printf("\033[2J");
   while(1){
     if(handleInput()) break;
-		myCam.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, myCam.pos, -1));
-		viewport.render_settings->active_camera = myCam;
+		//viewport.render_settings->active_camera = myCam;
 
     drawUI();
 		//getchar();
@@ -262,7 +259,8 @@ void initUI(){
 
 	parentComponent.children[4] = child;
 
-	/*viewport container*/
+
+	/*Viewport container*/
 	child = newContainer();
 	child->topToBottomOf= parentComponent.children[4];
 	child->startToStartOf = &parentComponent;
@@ -272,10 +270,37 @@ void initUI(){
 	//child->real_width = 3;
 	child->autoWidth = 2;
 	child->autoHeight = 2;
-	child->backgroundColor = BG_VP_COLOR;
+	child->padding = 1;
+	child->backgroundColor = BG_COLOR;
 	child->border = 1;
-
+	child->childCount = 1;
+	child->children = malloc(sizeof(Component *));
 	parentComponent.children[5] = child;
+	
+
+	/*viewport*/
+	child = newViewport();
+	child->topToTopOf= parentComponent.children[5];
+	child->startToStartOf = parentComponent.children[5];
+	child->endToEndOf= parentComponent.children[5];
+	child->bottomToBottomOf = parentComponent.children[5];
+	//child->height = 5;
+	//child->real_width = 3;
+	child->autoWidth = 2;
+	child->autoHeight = 2;
+	child->backgroundColor = BG_COLOR;
+	child->isUpdated = 1;
+	
+	Camera myCam;
+	//myCam.pos = (Vector3d){15, 0, 8};
+	//myCam.pos = (Vector3d){70, 0, 50};
+	myCam.pos = (Vector3d){10, 0, 3};
+	myCam.dir = (Vector3d){2, 0, 3};
+	myCam.fov = 45;
+	myCam.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, myCam.pos, -1));
+	child->viewport_properties.vp_settings->render_settings->active_camera = myCam;
+
+	parentComponent.children[5]->children[0] = child;
 
 
 	}
@@ -317,6 +342,9 @@ void mark_component_as_updated(Component * component){
 	component->real_height = -1;
 	component->real_width = -1;
 	component->isUpdated = 3;
+	if(component->component_type == viewport_t){
+		component->isUpdated = 1;
+	}
 
 	for(int i = 0; i<component->childCount; i++){
 		mark_component_as_updated(component->children[i]);
@@ -324,6 +352,8 @@ void mark_component_as_updated(Component * component){
 }
 
 void restoreTerminal(){
+//glfwDestroyWindow(window);
+  glfwTerminate();
   //signal(SIGWINCH, handle_resize);
   disable_raw_mode();
   
@@ -380,32 +410,39 @@ void get_terminal_size(int *rows, int *cols) {
 
 void drawComponent(Component * component, Component * parent){
 	debug("Drawing component %d.", component);
-  if(component->component_type == container_t) drawContainer(component, parent);
+  switch (component->component_type){
+		case container_t: drawContainer(component, parent); break;
+		case viewport_t: drawViewport(component, parent); break;
+	}
 }
 
 void drawContainer(Component * component, Component * parent){
 	debug("Drawing container %d.\n X: %d, Y: %d,\n height: %d,\n width: %d", component, component->x, component->y, component->real_height, component->real_width);
-  if(component->isUpdated== 0) return;
-  component->isUpdated--;
+  if(component->isUpdated != 0){
+		component->isUpdated--;
+		//Draws the border
+		if(component == &parentComponent) {
+			component->global_x = component->x;
+			component->global_y = component->y;
+			drawBox(component->x,
+						component->y,
+						component->real_height,
+						component->real_width,
+						component->border,
+						component->backgroundColor,
+						(Color){});
+		}else if(parent != NULL){
+			component->global_x = component->x + parent->global_x;
+			component->global_y = component->y + parent->global_y;
+			drawBox(component->global_x,
+						component->global_y,
+						component->real_height,
+						component->real_width,
+						component->border,
+						component->backgroundColor,
+						(Color){});
 
-  //Draws the border
-  if(component == &parentComponent) {
-		drawBox(component->x,
-          component->y,
-          component->real_height,
-          component->real_width,
-					component->border,
-					component->backgroundColor,
-					(Color){});
-	}else if(parent != NULL){
-		drawBox(component->x + parent->x,
-          component->y+ parent->y,
-          component->real_height,
-          component->real_width,
-					component->border,
-					component->backgroundColor,
-					(Color){});
-
+		}
 	}
   
   //Iterates over every child component
@@ -467,6 +504,39 @@ void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
     fflush(stdout);
   }
 }
+
+void drawViewport(Component * component, Component * parent){
+	if(component->isUpdated != 0){
+		component->isUpdated--;
+		//Get the terminal cell size
+		debug("Calculating viewport size");
+		struct winsize ws;
+		ioctl(0, TIOCGWINSZ, &ws);
+		debug("Window Size: %d cols %d rows %dx %dy", ws.ws_col, ws.ws_row, ws.ws_xpixel, ws.ws_ypixel);
+		debug("Component Size: %d cols %d rows", component->real_width, component->real_height);
+		component->viewport_properties.vp_settings->y = component->y + parent->global_y;
+		component->viewport_properties.vp_settings->x = component->x + parent->global_x;
+		component->viewport_properties.vp_settings->screen_width = component->real_width * ws.ws_xpixel / ws.ws_col;
+		component->viewport_properties.vp_settings->screen_height= component->real_height * ws.ws_ypixel / ws.ws_row;
+		component->viewport_properties.vp_settings->render_settings->screen_height = component->viewport_properties.vp_settings->screen_height;
+		component->viewport_properties.vp_settings->render_settings->screen_width = component->viewport_properties.vp_settings->screen_width;
+
+		if(component->viewport_properties.vp_settings->window != NULL){
+			resizeWindow(component->viewport_properties.vp_settings);
+		}
+
+		debug("Viewport Size: %d x; %d y", component->viewport_properties.vp_settings->screen_width, component->viewport_properties.vp_settings->screen_height);
+	}
+	if(component->viewport_properties.vp_settings->window == NULL){
+		debug("Initializing viewport");
+		vp_init_viewport(component->viewport_properties.vp_settings);
+	}
+
+	debug("Drawing viewport");
+	debug("%dx, %dy", component->viewport_properties.vp_settings->x, component->viewport_properties.vp_settings->y);
+	vp_render_viewport(component->viewport_properties.vp_settings);
+}
+
 void drawUI(){
 	calculateComponentDimensions(&parentComponent, &parentComponent);
   drawComponent(&parentComponent, NULL);
@@ -811,6 +881,25 @@ Component * newContainer(){
 
 	return cont;
 }
+
+
+Component * newViewport(){
+	debug("Creating viewport");
+	Component * cont = newContainer();
+	cont->component_type = viewport_t;
+	cont->viewport_properties.vp_settings = malloc(sizeof(ViewportSettings));
+	
+	debug("Create Viewport");	
+	vp_create_viewport(cont->viewport_properties.vp_settings);
+
+	//cont->viewport_properties.vp_settings->window = NULL;
+  //debug("Initializing viewport");
+	//vp_init_viewport(cont->viewport_properties.vp_settings);
+
+	return cont;
+
+}
+
 
 /*Creates new color based on an Hex string*/
 Color * newColor(uint8_t r, uint8_t g, uint8_t b){
