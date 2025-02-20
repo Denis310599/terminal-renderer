@@ -12,6 +12,12 @@
 #include "../include/renderer.h"
 #include "../include/viewport.h"
 
+/*Data structures*/
+typedef struct StringTable{
+	char ** table;
+	int length;
+} StringTable;
+
 /*Appearance Structures*/
 typedef struct Color{
 	uint8_t r;
@@ -30,6 +36,24 @@ typedef struct Viewport{
   ViewportSettings * vp_settings;
 } Viewport;
 
+typedef struct TabView{
+	StringTable tabTitles;
+	int tabCount;
+	int selectedTab;
+	int focusTab;
+	Color bgColor;
+	Color bgSelectedColor;
+	Color bgFocusColor;
+	Color txtColor;
+	Color txtSelectedColor;
+	Color txtFocusColor;
+	int tabPosition; //0 up, 1 down, 2 right, 3 left
+	char *iconEnd;
+	char *iconStart;
+	int tabHeight;
+	int offset;
+} TabView;
+
 typedef struct Style{
 	char ** barckgroundColor;
 	char ** focusBackgroundColor;
@@ -39,7 +63,7 @@ typedef struct Style{
 	char ** borderColor;
 } Style;
 
-enum ComponentType {container_t, viewport_t};
+enum ComponentType {container_t, viewport_t, tabview_t};
 typedef struct Component{
   //Basic config
 	enum ComponentType component_type;
@@ -85,6 +109,9 @@ typedef struct Component{
 	int autoWidth;
 	float widthBias;
 
+	//Function handlers
+	void (* onKeyPress)(struct Component *, char keypress);
+
 	//Appearance
 	int border; //0 no border, 1 normal border, 2 big border
 	Color backgroundColor;
@@ -96,8 +123,10 @@ typedef struct Component{
   union{
     Container container_properties;
 		Viewport viewport_properties;
+		TabView tabview_properties;
   };
   int childCount;
+	struct Component * parent;
   struct Component ** children;
 } Component;
 
@@ -108,15 +137,19 @@ void drawContainer(Component * component, Component * parent);
 void drawComponent(Component * component, Component * parent);
 void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor, Color borderColor);
 void drawViewport(Component * component, Component * parent);
+void drawTabView(Component * component, Component * parent);
+void printText(int x, int y, char * text, Color bg, Color fg);
 void mark_component_as_updated(Component * component);
 void handle_resize();
 
 void calculateComponentDimensions(Component * component, Component * parent);
 void calculateComponentDimensionsWidth(Component * component, Component * parent);
 void calculateComponentDimensionsHeight(Component * component, Component * parent);
+void preCalculateComponent(Component * component, Component * parent);
 
 Component * newContainer();
 Component * newViewport();
+Component * newTabView();
 Color * newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
@@ -129,14 +162,50 @@ void prepareTerminal();
 void restoreTerminal();
 void get_terminal_size(int *rows, int *cols);
 
+
+void addStringToTable(char * string, StringTable * table);
+StringTable newStringTable(char * string);
 /*File accessible variables*/
 Component parentComponent;
 
+/*Custom function declaration(aka handlers)*/
+void handleObjectManajerKeyPress(Component * component, char keypress);
+
 /*Color deffinitions*/
 const Color BG_COLOR = (Color){7, 18, 36};
-const Color FONT_COLOR= (Color){173, 173, 173};
 const Color BG_2_COLOR= (Color){29, 42, 64};
+const Color BG_3_COLOR= (Color){42, 59, 89};
+const Color BG_DISABLE_COLOR = (Color){67, 75, 89};
+const Color FONT_COLOR= (Color){173, 173, 173};
+const Color FONT_2_COLOR= (Color){130, 130, 130};
+const Color FONT_3_COLOR= (Color){99, 99, 99};
 const Color BG_VP_COLOR= (Color){60, 60, 60};
+
+/*Variable deffinitions*/
+Component * focusComponent;
+
+
+/*Handler deffinition*/
+
+
+void handleObjectManajerKeyPress(Component * component, char keypress){
+	debug("Handling keypress in ObjectManager");
+	switch(keypress){
+		case '3':
+			component->tabview_properties.selectedTab == (component->tabview_properties.tabCount-1) ? : component->tabview_properties.selectedTab++;
+			break;
+		case '1':
+			component->tabview_properties.selectedTab == 0 ? : component->tabview_properties.selectedTab--;
+			break;
+	}
+	component->isUpdated = 1;
+
+	if(component->tabview_properties.selectedTab >= component->childCount) return;
+	component->children[component->tabview_properties.selectedTab]->isUpdated = 1;
+
+}
+
+/*Here starts the Library related functions*/
 int main(){
 	DEBUG=1;
   initUI();
@@ -303,6 +372,25 @@ void initUI(){
 	parentComponent.children[5]->children[0] = child;
 
 
+	/*Object Manager*/
+	Component * objectContainer = parentComponent.children[3];
+	objectContainer->padding = 1;
+	objectContainer->children = malloc(sizeof(Component*));
+	objectContainer->childCount = 1;
+	objectContainer->children[0] = newTabView();
+	objectContainer->children[0]->topToTopOf = objectContainer;
+	objectContainer->children[0]->bottomToBottomOf = objectContainer;
+	objectContainer->children[0]->startToStartOf = objectContainer;
+	objectContainer->children[0]->endToEndOf = objectContainer;
+	objectContainer->children[0]->autoHeight = 2;
+	objectContainer->children[0]->autoWidth = 2;
+	objectContainer->children[0]->tabview_properties.selectedTab = 0;
+	objectContainer->children[0]->onKeyPress = handleObjectManajerKeyPress;
+
+	focusComponent = objectContainer->children[0];
+	
+
+
 	}
 
 void prepareTerminal(){
@@ -387,11 +475,14 @@ void set_nonblocking_mode() {
 int handleInput(){
   char ch;
   if(read(STDIN_FILENO, &ch, 1)>0){
+		debug("Char presser: %c", ch);
     if(ch == 'q'){
       //Process closing
       closeProgram();
       return 1;
     }
+		//Pass the event to the focused component
+		focusComponent->onKeyPress(focusComponent, ch);
   }
   return 0;
 }
@@ -413,11 +504,12 @@ void drawComponent(Component * component, Component * parent){
   switch (component->component_type){
 		case container_t: drawContainer(component, parent); break;
 		case viewport_t: drawViewport(component, parent); break;
+		case tabview_t: drawTabView(component, parent); break;
 	}
 }
 
 void drawContainer(Component * component, Component * parent){
-	debug("Drawing container %d.\n X: %d, Y: %d,\n height: %d,\n width: %d", component, component->x, component->y, component->real_height, component->real_width);
+	debug("***Drawing container %d.\n X: %d, Y: %d,\n height: %d,\n width: %d", component, component->x, component->y, component->real_height, component->real_width);
   if(component->isUpdated != 0){
 		component->isUpdated--;
 		//Draws the border
@@ -505,7 +597,15 @@ void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
   }
 }
 
+/*Function that prints some text with color at a desired position*/
+void printText(int x, int y, char * text, Color bg, Color fg){
+  printf("\033[%d;%dH", y, x);
+	printf("\e[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", fg.r, fg.g, fg.b, bg.r, bg.g, bg.b, text);
+  fflush(stdout);
+}
+
 void drawViewport(Component * component, Component * parent){
+
 	if(component->isUpdated != 0){
 		component->isUpdated--;
 		//Get the terminal cell size
@@ -537,15 +637,113 @@ void drawViewport(Component * component, Component * parent){
 	vp_render_viewport(component->viewport_properties.vp_settings);
 }
 
+/*Function that handles the drawing of a tabview*/
+void drawTabView(Component * component, Component * parent){
+	debug("***Drawing tabview***");
+	if(component->isUpdated != 0){
+		component->isUpdated--;
+		/*Draws the actual tabs*/
+		
+		int start_x = component->x + parent->global_x +1;
+		int start_y = component->y + parent->global_y +1;
+
+		int aux_x = start_x;
+		int aux_y = start_y;
+		int arrowLengthStart = strlen(component->tabview_properties.iconStart);
+		int arrowLengthEnd = strlen(component->tabview_properties.iconEnd);
+		int offset = component->tabview_properties.offset;
+		//Draw the first right icon
+		debug("Drawing first icon at %d %d", aux_x, aux_y);
+		printText(aux_x, aux_y, component->tabview_properties.iconStart, component->tabview_properties.bgColor, component->tabview_properties.txtColor);
+		aux_x += strlen(component->tabview_properties.iconStart);
+
+		//Draw the actual tabs
+		debug("Drawing tabs");
+		for(int i = 0; i<component->tabview_properties.tabCount; i++){
+			debug("tab %d", i+1);
+			Color bgColor;
+			Color fwColor;
+			debug(".. Title: %s", component->tabview_properties.tabTitles.table[i]);
+			int titleLength = strlen(component->tabview_properties.tabTitles.table[i]);
+			debug(".. Title of length %d", titleLength);
+
+
+			int max_titleLength = start_x + component->real_width - aux_x -arrowLengthEnd;
+			titleLength = max_titleLength >= titleLength ? titleLength : max_titleLength;
+			char * title = malloc(sizeof(char) * titleLength);
+			strncpy(title, component->tabview_properties.tabTitles.table[i], titleLength);
+			debug(".. titleLength: %d", titleLength);
+			if(titleLength > 0) {
+				title[titleLength] = '\0';
+			}
+
+			if(i == component->tabview_properties.selectedTab){
+				 bgColor= component->tabview_properties.bgSelectedColor;
+				fwColor = component->tabview_properties.txtSelectedColor;
+			}else if(i == component->tabview_properties.focusTab){
+				 bgColor= component->tabview_properties.bgFocusColor;
+				fwColor = component->tabview_properties.txtFocusColor;
+			}else{
+				 bgColor= component->tabview_properties.bgColor;
+				fwColor = component->tabview_properties.txtColor;
+			}
+			debug(".. Drawing tab %s at %d %d", component->tabview_properties.tabTitles.table[i], aux_x, aux_y);
+			printText(aux_x, aux_y, title, bgColor, fwColor);
+			aux_x += titleLength;
+			debug("Aux_x: %d", aux_x);
+			
+			//Update the global coordinates
+			component->global_x = component->x + parent->global_x;
+			component->global_y = component->y + parent->global_y;
+
+			if(aux_x == (start_x + component->real_width - arrowLengthEnd)) break;
+		}
+
+		int leftTabToDraw = start_x + component->real_width - arrowLengthEnd - aux_x;
+		for(int i = 0; i< leftTabToDraw; i++){
+			printText(aux_x, start_y, " ", component->tabview_properties.bgColor, component->tabview_properties.txtColor);
+			aux_x++;
+		}
+
+		//Draw the final arrow
+		aux_x = start_x+component->real_width - arrowLengthEnd;
+		printText(aux_x, aux_y, component->tabview_properties.iconEnd, component->tabview_properties.bgColor, component->tabview_properties.txtColor);
+	}
+	//Draws the component of the selected tab
+	if(component->tabview_properties.selectedTab >= component->childCount) return;
+	drawComponent(component->children[component->tabview_properties.selectedTab], component);
+}
+
 void drawUI(){
 	calculateComponentDimensions(&parentComponent, &parentComponent);
   drawComponent(&parentComponent, NULL);
 }
 
+/*Function that pre-process a component, updating properties for further calculation*/
+void preCalculateComponent(Component * component, Component * parent){
+	if(component->real_height != -1 && component->real_width != -1) return;
+	component->parent = parent;
+
+	if(component->component_type ==tabview_t){
+		component->paddingTop = component->tabview_properties.tabHeight;
+	}
+}
+
 /*Function that calculates component dimensions and populates its properties*/
 void calculateComponentDimensions(Component * component, Component * parent){
+	debug("Calculando componente con id %d", component);
+	preCalculateComponent(component, parent);
+
 	calculateComponentDimensionsWidth(component, parent);
 	calculateComponentDimensionsHeight(component, parent);
+	
+	//Process the children that are not processed yet
+	debug("Numero hijos: %d", component->childCount);
+	//debug("Hijos: %d", 1);
+	for(int i = 0; i<component->childCount; i++){
+		debug("Calculando hijo %d", i);
+		if(component->children[i]->real_height == -1 || component->children[i]->real_width == -1) calculateComponentDimensions(component->children[i], component);
+	}
 }
 
 /*Function that calculates and populates the dimensions and positions of a component y coordinate*/
@@ -603,7 +801,7 @@ void calculateComponentDimensionsHeight(Component * component, Component * paren
 			min_y = component->topToBottomOf->y+ component->topToBottomOf->real_height;
 		}
 		min_y += componentMarginTop;
-	}else if(component->bottomToBottomOf == NULL && component->bottomToTopOf == NULL || component->topToTopOf == parent){
+	}else if((component->bottomToBottomOf == NULL && component->bottomToTopOf == NULL) || component->topToTopOf == parent){
 		//Default: topToTopOf: Parent
 		int parentPadding = parent->paddingTop != -1 ? parent->paddingTop : parent->padding;
 		min_y = componentMarginTop + parentPadding;
@@ -688,13 +886,7 @@ void calculateComponentDimensionsHeight(Component * component, Component * paren
 	debug("Final height component %d: %d", parent, component->real_height);
 	debug("Final y component %d: %d", parent, component->y);
 
-	//Process the children that are not processed yet
-	debug("Numero hijos: %d", component->childCount);
-	//debug("Hijos: %d", 1);
-	for(int i = 0; i<component->childCount; i++){
-		debug("Calculando hijo %d al final", i);
-		if(component->children[i]->real_height == -1) calculateComponentDimensionsHeight(component->children[i], component);
-	}
+	
 }
 
 /*Function that calculates and populates the dimensions and positions of a component x coordinate*/
@@ -836,14 +1028,6 @@ void calculateComponentDimensionsWidth(Component * component, Component * parent
 	}
 	debug("Final width component %d: %d", parent, component->real_width);
 	debug("Final x component %d: %d", parent, component->x);
-
-	//Process the children that are not processed yet
-	debug("Numero hijos: %d", component->childCount);
-	//debug("Hijos: %d", 1);
-	for(int i = 0; i<component->childCount; i++){
-		debug("Calculando hijo %d al final", i);
-		if(component->children[i]->real_width== -1) calculateComponentDimensionsWidth(component->children[i], component);
-	}
 }
 
 
@@ -876,8 +1060,8 @@ Component * newContainer(){
 	cont->border = 1;
 	cont->xBias = -1;
 	cont->yBias = -1;
-	cont->heightBias = 1;
-	cont->widthBias = 1;
+	cont->heightBias = -1;
+	cont->widthBias = -1;
 
 	return cont;
 }
@@ -900,9 +1084,95 @@ Component * newViewport(){
 
 }
 
+Component * newTabView(){
+	debug("\n\n***Creating tabView***");
+	Component * cont = newContainer();
+	cont->component_type = tabview_t;
+
+	//cont->tabview_properties.iconStart = malloc(sizeof(char)*2);
+	cont->tabview_properties.iconStart = " < ";
+	//cont->tabview_properties.iconEnd = malloc(sizeof(char)*2);
+	cont->tabview_properties.iconEnd = " > ";
+
+	cont->tabview_properties.tabPosition = 0;
+	cont->tabview_properties.tabHeight = 1;
+	cont->tabview_properties.bgColor = BG_2_COLOR;
+	cont->tabview_properties.bgFocusColor = BG_COLOR;
+	cont->tabview_properties.bgSelectedColor = BG_3_COLOR;
+	cont->tabview_properties.txtColor = FONT_2_COLOR;
+	cont->tabview_properties.txtFocusColor = FONT_2_COLOR;
+	cont->tabview_properties.txtSelectedColor = FONT_COLOR;
+
+	Component * contSon1 = newContainer();
+	contSon1->backgroundColor = (Color){60, 60, 60};
+	contSon1->topToTopOf = cont;
+	contSon1->bottomToBottomOf= cont;
+	contSon1->startToStartOf= cont;
+	contSon1->endToEndOf= cont;
+	contSon1->autoHeight = 2;
+	contSon1->autoWidth = 2;
+	contSon1->border = 1;
+
+	Component * contSon2 = newContainer();
+	contSon2->backgroundColor = (Color){120, 20, 20};
+	contSon2->topToTopOf = cont;
+	contSon2->bottomToBottomOf= cont;
+	contSon2->startToStartOf= cont;
+	contSon2->endToEndOf= cont;
+	contSon2->autoHeight = 2;
+	contSon2->autoWidth = 2;
+	contSon2->border = 1;
+
+	cont->tabview_properties.tabCount = 6;
+	cont->children = malloc(sizeof(Component *)*2);
+	cont->children[0] = contSon1;
+	cont->children[1] = contSon2;
+	cont->childCount = 2;
+	
+	cont->tabview_properties.tabTitles = newStringTable(" Hello ");
+	StringTable * tablaAux = &(cont->tabview_properties.tabTitles);
+	addStringToTable(" GoodBye ", tablaAux);
+	addStringToTable(" GoodBye ", tablaAux);
+	addStringToTable(" GoodBye ", tablaAux);
+	addStringToTable(" GoodBye ", tablaAux);
+	addStringToTable(" GoodBye ", tablaAux);
+
+
+
+
+
+	cont->isUpdated = 3;
+	cont->tabview_properties.focusTab = -1;
+	return cont;
+
+}
+
 
 /*Creates new color based on an Hex string*/
 Color * newColor(uint8_t r, uint8_t g, uint8_t b){
 	Color * retPtr = malloc(sizeof(Color));
 	return retPtr;
+}
+
+/*Function that creates a new table of strings*/
+StringTable newStringTable(char * string){
+	StringTable retTable;
+	retTable.table = malloc(sizeof(char *));
+	retTable.table[0] = malloc(sizeof(char)*strlen(string) +1);
+	retTable.length = 1;
+	strcpy(retTable.table[0], string);
+	debug("Nueva tabla con elemento: %s", retTable.table[0]);
+	return retTable;
+}
+
+/*Function that adds a new string to a table of strings*/
+void addStringToTable(char * string, StringTable * table){
+	char ** auxTable = malloc(sizeof(char *) * (table->length+1));
+	memcpy(auxTable, table->table, table->length * sizeof(char*));
+	free(table->table);
+	table->table = auxTable;
+	table->table[table->length] = malloc(sizeof(char)*strlen(string) +1);
+	strcpy(table->table[table->length], string);
+	debug("Elemento añadido a tabla en %d: %s", table->length, table->table[table->length]);
+	table->length++;
 }
