@@ -56,6 +56,9 @@ typedef struct TabView{
 } TabView;
 
 typedef struct Text{
+	Color textColor;
+	Color bgColor;
+	int oneLine;
 	char * content;
 }Text;
 
@@ -146,7 +149,7 @@ void drawViewport(Component * component, Component * parent);
 void drawTabView(Component * component, Component * parent);
 void drawTextComponent(Component * component);
 void printText(int x, int y, char * text, Color bg, Color fg);
-void mark_component_as_updated(Component * component);
+void mark_component_as_updated(Component * component, int resize);
 void handle_resize();
 
 void calculateComponentDimensions(Component * component, Component * parent);
@@ -159,6 +162,7 @@ void preCalculateTextComponent(Component * component);
 Component * newContainer();
 Component * newViewport();
 Component * newTabView();
+Component * newTextComponent(char * text);
 Color * newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
@@ -220,7 +224,8 @@ void handleObjectManajerKeyPress(Component * component, char keypress){
 	component->isUpdated = 1;
 
 	if(component->tabview_properties.selectedTab >= component->childCount) return;
-	component->children[component->tabview_properties.selectedTab]->isUpdated = 1;
+	mark_component_as_updated(component->children[component->tabview_properties.selectedTab], 0);
+	//component->children[component->tabview_properties.selectedTab]->isUpdated = 1;
 
 }
 
@@ -437,11 +442,27 @@ void initUI(){
 	tabView->children[1]->autoHeight = 2;
 	tabView->children[1]->autoWidth = 2;
 	tabView->children[1]->border = 1;
-	tabView->children[1]->backgroundColor = (Color){200, 20, 20};
+	tabView->children[1]->backgroundColor = BG_COLOR;
+
+	/*Material tab content*/
+	Component * matCont = tabView->children[1];
+	matCont->childCount = 1;
+	matCont->children = malloc(sizeof(Container *));
+	Component * text1 = newTextComponent("Materials tab is under development");
+	text1->topToTopOf = matCont;
+	text1->bottomToBottomOf = matCont;
+	text1->startToStartOf = matCont;
+	text1->endToEndOf = matCont;
+	text1->autoHeight = 1;
+	text1->autoWidth = 1;
+	text1->margin = 5;
+	text1->text_properties.oneLine = 0;
+	//text1->width = 25;
+	matCont->children[0] = text1;
 
 	focusComponent = objectContainer->children[0];
-	
 
+	//TODO: Empezar con el tree view
 
 	}
 
@@ -468,7 +489,7 @@ void handle_resize(){
 	debug("Resizing window");
   printf("\033[2J");
 	//marco elementos como por updatear
-	mark_component_as_updated(&parentComponent);
+	mark_component_as_updated(&parentComponent, 1);
 	
 	int rows, cols;
   get_terminal_size(&rows, &cols);
@@ -478,16 +499,18 @@ void handle_resize(){
 
 }
 
-void mark_component_as_updated(Component * component){
-	component->real_height = -1;
-	component->real_width = -1;
-	component->isUpdated = 3;
+void mark_component_as_updated(Component * component, int resize){
+	if(resize){
+		component->real_height = -1;
+		component->real_width = -1;
+	}
+	component->isUpdated = 1;
 	if(component->component_type == viewport_t){
 		component->isUpdated = 1;
 	}
 
 	for(int i = 0; i<component->childCount; i++){
-		mark_component_as_updated(component->children[i]);
+		mark_component_as_updated(component->children[i], resize);
 	}
 }
 
@@ -561,6 +584,7 @@ void drawComponent(Component * component, Component * parent){
 		case container_t: drawContainer(component, parent); break;
 		case viewport_t: drawViewport(component, parent); break;
 		case tabview_t: drawTabView(component, parent); break;
+		case text_t: drawTextComponent(component); break;
 	}
 }
 
@@ -811,7 +835,122 @@ void drawTabView(Component * component, Component * parent){
 }
 
 /*Function that draws a text component*/
-void drawTextComponent(Component * component){
+void drawTextComponent(Component * component){	
+	if(component->isUpdated != 0){
+		component->isUpdated--;
+		debug("Printing text %s in text of size %dx %dy. Len: %d", component->text_properties.content, component->real_width, component->real_height, strlen(component->text_properties.content)); 
+		char * stringToPrint = component->text_properties.content;
+		char * finalString = malloc(sizeof(char) * (strlen(stringToPrint) * 2) +1);
+		strcpy(finalString, "");
+		debug("Final string: %s", finalString);
+		char * wordToPrint = malloc(sizeof(char) * strlen(stringToPrint));
+		int calculatedHeight = 1;
+		int wordOffset = 0;
+		int lineOffset = 0;
+		int firstWord = 1;
+		//Calculate string height
+		for(int i = 0; i< strlen(stringToPrint)+1; i++){
+			//For every letter, store each word, and if it fits in width, print it
+			debug("Char to print: %c", stringToPrint[i]);
+			debug("..WordOffset %d", wordOffset);
+			debug("..LineOffset %d", lineOffset);
+			if(stringToPrint[i] == ' ' || 
+				 stringToPrint[i] == '\n' ||
+				 stringToPrint[i] == '\r' ||
+				 stringToPrint[i] == '\t' ||
+				 stringToPrint[i] == '\0'){
+				wordToPrint[wordOffset] = '\0';
+				//If word can be stored inside the remaining string, store it
+				if((stringToPrint[i] != '\0' && wordOffset+1 <= (component->real_width - lineOffset)) ||
+					(stringToPrint[i] == '\0' && wordOffset <= (component->real_width - lineOffset))){
+					//wordToPrint[wordOffset] = '\0';
+					debug("Storing word in final string: %s", wordToPrint);
+					debug("Final string: %s", finalString);
+					//No need for adding new line
+					if(!firstWord)strcat(finalString, " ");firstWord=0;
+					strncat(finalString, wordToPrint, wordOffset);
+					strcpy(wordToPrint, "");
+					lineOffset += wordOffset+1;
+					wordOffset = 0;
+
+					if(stringToPrint[i] == '\0'){
+						strcat(finalString, "\0");
+						break;
+					}
+				}else{
+					//Store word in next line
+					debug("New line jump for word: %s", wordToPrint);
+					calculatedHeight++;
+					//If next line is over the limit, put '...'
+					if(calculatedHeight > component->real_height){
+						int remainingSpace = component->real_width - lineOffset;
+						if(!firstWord && remainingSpace>0)strcat(finalString, " ");firstWord=0;
+						if(remainingSpace == 0) remainingSpace = 1;
+						strncat(finalString, wordToPrint, remainingSpace-1);
+						strcat(finalString, "…\0");
+						debug("Remaining space: %d", remainingSpace);
+						break;
+					}else{
+					//If next line is available, store the word in next line
+						strcat(finalString, "\n");
+						strncat(finalString, wordToPrint, wordOffset);
+						lineOffset = wordOffset+1;
+						wordOffset = 0;
+						strcpy(wordToPrint, "");
+					}
+				}
+				
+				if(stringToPrint[i] == '\n' || stringToPrint[i] == '\r'){
+					strncat(finalString, stringToPrint+i, 1);
+					calculatedHeight++;
+					wordOffset = 0;
+					lineOffset = 0;
+					firstWord = 1;
+				}else if(stringToPrint[i] == '\t'){
+					strncat(finalString, stringToPrint+i, 1);
+					//IDK what to do, treat it as 8 spaces
+					lineOffset +=8;
+					wordOffset = 0;
+				}
+
+			}else{
+				//wordToPrint[wordOffset] = stringToPrint[i];
+				wordToPrint[wordOffset] =  stringToPrint[i];
+				wordOffset++;
+				//lineOffset++;
+			}
+		//If word too long, split it with '-'
+		}
+
+		component->global_x = component->x + component->parent->global_x;
+		component->global_y = component->y + component->parent->global_y;
+
+		int init_line = 0;
+		int line_index = 0;
+
+		debug("Final String being printed: %s", finalString);
+		int finalStringLength = strlen(finalString);
+		for (int i = 0; i < finalStringLength+1; i++) {
+			debug("Char reading: %c", finalString[i]);
+			if (finalString[i] == '\n' || finalString[i] == '\r' || finalString[i] == '\0' || i == strlen(finalString)) {
+				finalString[i] = '\0';
+				debug("Printing final String: %s", finalString + init_line);
+				printText(component->global_x, component->global_y + line_index,
+									finalString + init_line,
+									component->text_properties.bgColor,
+									component->text_properties.textColor);
+				init_line = i + 1;
+				line_index++;
+			}
+		}
+	}
+
+	for (int i = 0; i < component->childCount; i++) {
+		if (component->children[i] != NULL) {
+			drawComponent(component->children[i], component->parent);
+		}
+	}
+	//int i = 0/0;
 
 }
 
@@ -834,7 +973,7 @@ void preCalculateComponent(Component * component, Component * parent){
 	if(component->component_type ==tabview_t){
 		component->paddingTop = component->tabview_properties.tabHeight;
 	}else if(component->component_type == text_t){
-		
+		preCalculateTextComponent(component);
 	}
 
 }
@@ -845,11 +984,89 @@ void preCalculateTextComponent(Component * component){
 	 *IF fit content only height: calculated on draw
 	 *IF fit content width AND height: width = string length 
 	 */
-	if(component->autoWidth == 1 && component->autoHeight == 1){
-		component->autoWidth = 0;
+
+	if(component->text_properties.oneLine == 0){
+		if(component->autoWidth != 1){
+			//Calculate width
+			calculateComponentDimensionsWidth(component, component->parent);
+		}else{
+			component->real_width = 999999;
+		}
+		
+		int longestSentence = 0;
+		char * stringToPrint = component->text_properties.content;
+		//char * wordToPrint = malloc(sizeof(char) * strlen(stringToPrint));
+		int calculatedHeight = 1;
+		int wordOffset = 0;
+		int lineOffset = 0;
+		//Calculate string height
+		for(int i = 0; i< strlen(stringToPrint)+1; i++){{
+		//For every letter, store each word, and if it fits in width, print it
+		debug("Char to print: %c", stringToPrint[i]);
+		//debug("..WordOffset %d", wordOffset);
+		//debug("..LineOffset %d", lineOffset);
+		if(stringToPrint[i] == ' ' || 
+			 stringToPrint[i] == '\n' ||
+			 stringToPrint[i] == '\r' ||
+			 stringToPrint[i] == '\t' ||
+			 stringToPrint[i] == '\0'){
+			//If word can be stored inside the remaining string, store it
+			if((stringToPrint[i] != '\0' && wordOffset+1 <= (component->real_width - lineOffset)) ||
+				(stringToPrint[i] == '\0' && wordOffset <= (component->real_width - lineOffset))){
+				//wordToPrint[wordOffset] = '\0';
+				//No need for adding new line
+				if(stringToPrint[i] != '\0'){
+					lineOffset += wordOffset+1;
+					wordOffset = 0;
+				}else{
+					lineOffset += wordOffset;
+					wordOffset = 0;
+				}
+				longestSentence = longestSentence<lineOffset ?  lineOffset : longestSentence;
+			//store it in new line otherwise
+			}else{
+				//Add new line and store word
+				longestSentence = longestSentence<lineOffset ?  lineOffset : longestSentence;
+				lineOffset = wordOffset+1;
+				wordOffset = 0;
+				calculatedHeight++;
+			}
+			
+			if(stringToPrint[i] == '\n' || stringToPrint[i] == '\r'){
+				debug("Lane junp");
+				longestSentence = longestSentence<lineOffset ?  lineOffset : longestSentence;
+				calculatedHeight++;
+				wordOffset = 0;
+				lineOffset = 0;
+			}else if(stringToPrint[i] == '\t'){
+				//IDK what to do, treat it as 8 spaces
+				lineOffset +=8;
+				wordOffset = 0;
+			}
+			//If word can't be stored in a single line
+			//Split word in '-'? Just leave it there?
+		}else{
+			//wordToPrint[wordOffset] = stringToPrint[i];
+			wordOffset++;
+			//lineOffset++;
+		}
+	//If word too long, split it with '-'
+	}
+		}
+
+		component->height = calculatedHeight;
 		component->autoHeight = 0;
-		component->width = strlen(component->text_properties.content);
+		debug("Calculated Height: %d", calculatedHeight);
+		if(component->autoWidth == 1){
+			debug("Calculated Width: %d", longestSentence);
+			component->width = longestSentence;
+			component->autoWidth = 0;
+			component->real_width = -1;
+		}
+		//int i = 0/0;
+	}else{
 		component->height = 1;
+		component->autoHeight = 0;
 	}
 }
 
@@ -858,8 +1075,8 @@ void calculateComponentDimensions(Component * component, Component * parent){
 	debug("Calculando componente con id %d", component);
 	preCalculateComponent(component, parent);
 
-	calculateComponentDimensionsWidth(component, parent);
-	calculateComponentDimensionsHeight(component, parent);
+	if(component->real_width == -1) calculateComponentDimensionsWidth(component, parent);
+	if(component->real_height == -1) calculateComponentDimensionsHeight(component, parent);
 	
 	//Process the children that are not processed yet
 	debug("Numero hijos: %d", component->childCount);
@@ -971,8 +1188,16 @@ void calculateComponentDimensionsHeight(Component * component, Component * paren
 	//Bottom not deffinned but top is -> Stick to top (Need to know height)
 	//None of them deffined: Stick to top //Already did at top
 	
+	
 	//Depending on the mode, we calculate the height and position of the object
 	if(component->autoHeight == 0 || component->autoHeight == 1){
+		//Apply max and min height
+		if(component->maxHeight != -1){
+			if(component->real_height > component->maxHeight) component->real_height = component->maxHeight;
+		}
+		if(component->minHeight != -1){
+			if(component->real_height < component->minHeight) component->real_height = component->minHeight;
+		}
 		//Top not deffined -> stick to bottom
 		if(min_y == -1){ 
 			//max_y -= componentMarginTop;
@@ -1000,6 +1225,13 @@ void calculateComponentDimensionsHeight(Component * component, Component * paren
 		
 		component->real_height *= component->heightBias != -1 ? component->heightBias : 1; 
 		
+		//Apply max and min height
+		if(component->maxHeight != -1){
+			if(component->real_height > component->maxHeight) component->real_height = component->maxHeight;
+		}
+		if(component->minHeight != -1){
+			if(component->real_height < component->minHeight) component->real_height = component->minHeight;
+		}
 		//Both are deffined, we get the middle point (or biased)
 		float auxBias = component->yBias != -1 ? component->yBias*2 : 1;
 		if (component != &parentComponent) component->y = min_y + auxBias * (max_y-min_y-component->real_height)/2;
@@ -1188,6 +1420,8 @@ Component * newContainer(){
 	cont->yBias = -1;
 	cont->heightBias = -1;
 	cont->widthBias = -1;
+	cont->maxHeight = -1;
+	cont->minHeight = -1;
 
 	return cont;
 }
@@ -1239,6 +1473,26 @@ Component * newTabView(){
 	cont->tabview_properties.snapTab = 0;
 	return cont;
 
+}
+
+/*Creates a new text component*/
+Component * newTextComponent(char * text){
+	Component * cmp = newContainer();
+	cmp->component_type = text_t;
+	//cmp->text_properties.content = malloc(sizeof(char) * strlen(text));
+	//strcpy(cmp->text_properties.content, text); 
+	cmp->text_properties.content = text;
+	cmp->text_properties.bgColor = BG_COLOR;
+	cmp->text_properties.textColor = FONT_COLOR;
+	
+	return cmp;
+}
+
+/*Updates a string permanently*/
+void updateString(char **  origin, char * text){
+	if(*origin != NULL) free(*origin);
+	*origin = malloc(strlen(text));
+	strcpy(*origin, text);
 }
 
 
