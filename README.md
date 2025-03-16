@@ -3,10 +3,13 @@ This is a little project that lets you render a simle scene in ascii art inside 
 
 Currently it only supports CPU rendering and simple scenes, but the idea is to build a complete renderer that supports CPU and GPU rendering, and allows the user to interact with the scene in real time like any other CAD software.
 
-These are some captures of what I have achived so far :D
+These are some captures of what I have achived so far :D (From most recent to older)
+
+Basic UI With some elements
+![BasicUI2](./images/simpleUI2.png "SimpleUI2")
 
 Basic UI Work in progress
-    ![BasicUI](./images/simpleUI.png "SimpleUI")
+![BasicUI](./images/simpleUI.png "SimpleUI")
 
 ~90 000 Polygons at ~60 fps (With GPU)
 ![TeapotFPS](./images/teapot-gpu.png "Teapot")
