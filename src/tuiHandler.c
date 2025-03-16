@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 
@@ -62,6 +63,28 @@ typedef struct Text{
 	char * content;
 }Text;
 
+typedef struct TreeViewElement{
+	struct TreeViewElement * nextElement;
+	struct TreeViewElement * childElement;
+	struct TreeViewElement * parentElement;
+	struct TreeViewElement * prevElement;
+	int collapsed;
+	int status; //0 idle, 1 hover, 2 focus/selected
+	int nColors;
+	StringTable texts; //0 is for closing, 1 for opening, 2 for title
+	void * textComponent;
+	void * data;
+}TreeViewElement;
+
+typedef struct TreeView{
+	TreeViewElement * child;
+	TreeViewElement * selectedElement;
+	int nColors;
+	Color * colors; // bg/txt Select, hover, idle
+	int offset;
+	int snapElement;
+}TreeView;
+
 typedef struct Style{
 	char ** barckgroundColor;
 	char ** focusBackgroundColor;
@@ -71,7 +94,7 @@ typedef struct Style{
 	char ** borderColor;
 } Style;
 
-enum ComponentType {container_t, viewport_t, tabview_t, text_t};
+enum ComponentType {container_t, viewport_t, tabview_t, text_t, treeview_t};
 typedef struct Component{
   //Basic config
 	enum ComponentType component_type;
@@ -133,6 +156,7 @@ typedef struct Component{
 		Viewport viewport_properties;
 		TabView tabview_properties;
 		Text text_properties;
+		TreeView treeview_properties;
   };
   int childCount;
 	struct Component * parent;
@@ -148,6 +172,7 @@ void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
 void drawViewport(Component * component, Component * parent);
 void drawTabView(Component * component, Component * parent);
 void drawTextComponent(Component * component);
+void drawTreeView(Component * component);
 void printText(int x, int y, char * text, Color bg, Color fg);
 void mark_component_as_updated(Component * component, int resize);
 void handle_resize();
@@ -157,12 +182,15 @@ void calculateComponentDimensionsWidth(Component * component, Component * parent
 void calculateComponentDimensionsHeight(Component * component, Component * parent);
 void preCalculateComponent(Component * component, Component * parent);
 void preCalculateTextComponent(Component * component);
+void preCalculateTreeViewComponent(Component * component);
 
 
 Component * newContainer();
 Component * newViewport();
 Component * newTabView();
 Component * newTextComponent(char * text);
+TreeViewElement * newTreeViewElement(TreeViewElement * parent, int isChild);
+Component * newTreeViewComponent();
 Color * newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
@@ -178,6 +206,8 @@ void get_terminal_size(int *rows, int *cols);
 
 void addStringToTable(char * string, StringTable * table);
 StringTable newStringTable(char * string);
+TreeViewElement * getNextTreeViewElement(TreeViewElement * element, int collapsed);
+TreeViewElement * getPrevTreeViewElement(TreeViewElement * element, int careAboutCollapsed);
 /*File accessible variables*/
 Component parentComponent;
 
@@ -188,10 +218,12 @@ void handleObjectManajerKeyPress(Component * component, char keypress);
 const Color BG_COLOR = (Color){7, 18, 36};
 const Color BG_2_COLOR= (Color){29, 42, 64};
 const Color BG_3_COLOR= (Color){42, 59, 89};
+const Color BG_COLOR_SELECTED= (Color){42, 59, 89};
 const Color BG_DISABLE_COLOR = (Color){67, 75, 89};
 const Color FONT_COLOR= (Color){173, 173, 173};
 const Color FONT_2_COLOR= (Color){130, 130, 130};
 const Color FONT_3_COLOR= (Color){99, 99, 99};
+const Color FONT_COLOR_SELECTED= (Color){99, 99, 99};
 const Color BG_VP_COLOR= (Color){60, 60, 60};
 
 /*Variable deffinitions*/
@@ -199,8 +231,6 @@ Component * focusComponent;
 
 
 /*Handler deffinition*/
-
-
 void handleObjectManajerKeyPress(Component * component, char keypress){
 	debug("Handling keypress in ObjectManager");
 	switch(keypress){
@@ -220,12 +250,36 @@ void handleObjectManajerKeyPress(Component * component, char keypress){
 			component->tabview_properties.offset == 0 ? :component->tabview_properties.offset--;
 			component->tabview_properties.snapTab = 0;
 			break;
+		default:
+			//Pass to the component controller
+			if(component->tabview_properties.selectedTab < component->childCount &&
+					component->children[component->tabview_properties.selectedTab]->children[0]->onKeyPress != NULL){
+				component->children[component->tabview_properties.selectedTab]->children[0]->onKeyPress(component->children[component->tabview_properties.selectedTab]->children[0], keypress);
+			}
 	}
 	component->isUpdated = 1;
 
 	if(component->tabview_properties.selectedTab >= component->childCount) return;
 	mark_component_as_updated(component->children[component->tabview_properties.selectedTab], 0);
 	//component->children[component->tabview_properties.selectedTab]->isUpdated = 1;
+
+}
+
+/*Function that handles the tree view of the object manager*/
+void handleTreeViewInput(Component * component, char keypress){
+	debug("Handling keypress in TreeView");
+	switch(keypress){
+		case 'k':
+			component->treeview_properties.selectedElement = getPrevTreeViewElement(component->treeview_properties.selectedElement, 1) != NULL ? getPrevTreeViewElement(component->treeview_properties.selectedElement, 1) : component->treeview_properties.selectedElement;
+			break;
+		case 'j':
+			component->treeview_properties.selectedElement = getNextTreeViewElement(component->treeview_properties.selectedElement, component->treeview_properties.selectedElement->collapsed) != NULL ? getNextTreeViewElement(component->treeview_properties.selectedElement, component->treeview_properties.selectedElement->collapsed) : component->treeview_properties.selectedElement;
+			break;
+		case 'o':
+			if(component->treeview_properties.selectedElement->childElement != NULL) component->treeview_properties.selectedElement->collapsed = !component->treeview_properties.selectedElement->collapsed;
+	}
+	debug("New selected element: %s", component->treeview_properties.selectedElement->texts.table[2]);
+	mark_component_as_updated(component, 0);
 
 }
 
@@ -420,17 +474,50 @@ void initUI(){
 	/*Object tree*/
 	tabView->children = malloc(sizeof(Component*)*2);
 	tabView->childCount = 2;
+	
 	tabView->children[0] = newContainer();
-	tabView->children[0]-> backgroundColor = BG_COLOR;
-	tabView->children[0]-> border = 0;
+
 	tabView->children[0]->topToTopOf = tabView;
 	tabView->children[0]->bottomToBottomOf = tabView;
-	tabView->children[0]->endToEndOf = tabView;
 	tabView->children[0]->startToStartOf = tabView;
-	tabView->children[0]->autoHeight = 2;
+	tabView->children[0]->endToEndOf = tabView;
 	tabView->children[0]->autoWidth = 2;
+	tabView->children[0]->autoHeight = 2;
+	tabView->children[0]->border = 0;
 
 
+	tabView->children[0]->children = malloc(sizeof(Component *));
+	tabView->children[0]->childCount = 1;
+	tabView->children[0]->children[0] = newTreeViewComponent();
+	Component * treeView = tabView->children[0]->children[0];
+	treeView->topToTopOf = tabView->children[0];
+	treeView->bottomToBottomOf = tabView->children[0];
+	treeView->startToStartOf = tabView->children[0];
+	treeView->endToEndOf = tabView->children[0];
+	treeView->autoWidth = 2;
+	treeView->autoHeight = 2;
+	treeView->parent = tabView->children[0];
+	treeView->onKeyPress = handleTreeViewInput;
+
+	TreeViewElement * treeViewElem = newTreeViewElement(NULL, 0);
+	treeView->treeview_properties.child = treeViewElem;
+	addStringToTable("Elemento 1", &(treeViewElem->texts));
+	treeView->treeview_properties.selectedElement = treeViewElem;
+
+	treeViewElem = newTreeViewElement(treeViewElem, 0);
+	addStringToTable("Elemento 2", &(treeViewElem->texts));
+
+	TreeViewElement * childTreeView = newTreeViewElement(treeViewElem, 1);
+	addStringToTable("Este es un child element y su contenido es muy largo y sobre sale del espacio", &(childTreeView->texts));
+	TreeViewElement * childTreeView2 = newTreeViewElement(childTreeView, 1);
+	addStringToTable("Este es nieto", &(childTreeView2->texts));
+	childTreeView = newTreeViewElement(childTreeView, 0);
+	addStringToTable("Este es otro hijo", &(childTreeView->texts));
+	childTreeView = newTreeViewElement(childTreeView, 0);
+	addStringToTable("y otro hijo", &(childTreeView->texts));
+
+	treeViewElem = newTreeViewElement(treeViewElem, 0);
+	addStringToTable("Elemento 3", &(treeViewElem->texts));
 
 
 	/*Material tab*/
@@ -462,9 +549,8 @@ void initUI(){
 
 	focusComponent = objectContainer->children[0];
 
-	//TODO: Empezar con el tree view
-
-	}
+	
+}
 
 void prepareTerminal(){
   //Swaps buffer
@@ -585,6 +671,7 @@ void drawComponent(Component * component, Component * parent){
 		case viewport_t: drawViewport(component, parent); break;
 		case tabview_t: drawTabView(component, parent); break;
 		case text_t: drawTextComponent(component); break;
+		case treeview_t: drawTreeView(component); break;
 	}
 }
 
@@ -814,6 +901,7 @@ void drawTabView(Component * component, Component * parent){
 				printText(aux_x, aux_y, title, bgColor, fwColor);
 				aux_x += titleLength;
 				debug("Aux_x: %d", aux_x);
+				free(title);
 			}
 			
 			if(aux_x == (start_x + component->real_width - arrowLengthEnd)) break;
@@ -934,8 +1022,8 @@ void drawTextComponent(Component * component){
 			debug("Char reading: %c", finalString[i]);
 			if (finalString[i] == '\n' || finalString[i] == '\r' || finalString[i] == '\0' || i == strlen(finalString)) {
 				finalString[i] = '\0';
-				debug("Printing final String: %s", finalString + init_line);
-				printText(component->global_x, component->global_y + line_index,
+				debug("Printing final String: %s\n At: %dx, %dy", finalString + init_line, component->global_x, component->global_y + line_index);
+				printText(component->global_x +1, component->global_y + line_index +1,
 									finalString + init_line,
 									component->text_properties.bgColor,
 									component->text_properties.textColor);
@@ -943,7 +1031,12 @@ void drawTextComponent(Component * component){
 				line_index++;
 			}
 		}
+		//Free the strings
+		free(finalString);
+		free(wordToPrint);
+
 	}
+
 
 	for (int i = 0; i < component->childCount; i++) {
 		if (component->children[i] != NULL) {
@@ -954,10 +1047,123 @@ void drawTextComponent(Component * component){
 
 }
 
+/*Function that draws the TreeView*/
+void drawTreeView(Component * component){
+	debug("\n\n*** Drawing treeViewElement at %dx %dy ***	\n", component->x, component->y);
+	if(component->isUpdated == 0) return;
+	component->isUpdated--;
+	preCalculateTreeViewComponent(component);
+
+	component->global_x = component->parent->global_x + component->x;
+	component->global_y = component->parent->global_y + component->y;
+	debug("Parent local coords: %dx %dy", component->parent->x, component->parent->y);
+	debug("Parent global coords: %dx %dy", component->parent->global_x, component->parent->global_y);
+	int maxHeight = component->global_y + component->height;
+	int maxWidth = component->global_x + component->width;
+
+	char * stringToPrint = malloc(sizeof(char) * component->width);
+	//Iterate over each element and draw it
+	TreeViewElement * current = component->treeview_properties.child;
+	int actualHeight = 0;
+	int hierarchyLevel = 0;
+	int offset = 0;
+	int alternateCounter = 0;
+	int alternattingPattern = (component->treeview_properties.nColors-4)/2;
+	while(current != NULL){
+		
+		//if(offset <=
+		//TODO: Test what i have done so far
+		//Set up hierarchy symbols
+		
+		//Set up the text element
+		Component * textElement = ((Component *)current->textComponent);
+		textElement->parent = component;
+		textElement->isUpdated = 1;
+		textElement->y = actualHeight;
+		textElement->real_height = 1;
+		textElement->real_width = component->real_width - hierarchyLevel*3;
+		
+		//Text content
+		if(textElement->text_properties.content == NULL) free(textElement->text_properties.content);
+		int textSize = strlen(current->texts.table[0]) + strlen(current->texts.table[1]) + strlen(current->texts.table[2]) + 10;
+		if(textSize < (component->real_width - hierarchyLevel*3)) textSize = component->real_width +1 - hierarchyLevel*3;
+		textElement->text_properties.content = malloc(sizeof(char) * (textSize));
+		memset(textElement->text_properties.content, ' ', textSize-1);
+		int finalLength = 0;
+		if(current->childElement!= NULL){
+			finalLength = strlen(current->texts.table[current->collapsed]) + strlen(current->texts.table[2]) + 4;
+			sprintf(textElement->text_properties.content, "[%s] %s", current->texts.table[current->collapsed], current->texts.table[2]);
+		}else{
+			finalLength =strlen(current->texts.table[2]) +1; 
+			sprintf(textElement->text_properties.content,"%s", current->texts.table[2]);
+		}
+
+		if(textSize == component->real_width +1 - hierarchyLevel*3){
+			textElement->text_properties.content[finalLength-1] = ' ';
+			textElement->text_properties.content[textSize -1] = '\0';
+		}
+
+
+		//Text color
+		switch (current->status){
+			case 0:
+				//Idle status
+				textElement->text_properties.bgColor = component->treeview_properties.colors[4+alternateCounter*alternattingPattern];
+				textElement->text_properties.textColor = component->treeview_properties.colors[5+alternateCounter*alternattingPattern];
+				break;
+			case 1:
+				//Hover status
+				textElement->text_properties.bgColor = component->treeview_properties.colors[2];
+				textElement->text_properties.textColor = component->treeview_properties.colors[3];
+				break;
+			case 2: 
+				//Selected/Focus
+				textElement->text_properties.bgColor = component->treeview_properties.colors[0];
+				textElement->text_properties.textColor = component->treeview_properties.colors[1];
+				break;
+		}
+		//int i = 0/0;
+		//Draw the hierarchy elements
+		char * stringToDraw;
+		for(int i = 0; i<hierarchyLevel; i++){
+			if(i<hierarchyLevel-1) stringToDraw = " │ ";
+			else if(current->nextElement == NULL) stringToDraw = " └ ";
+			else stringToDraw = " ├ ";
+			printText(component->global_x + i*3 +1, component->global_y + actualHeight +1, stringToDraw, textElement->text_properties.bgColor, textElement->text_properties.textColor);
+		}
+		
+		textElement->x = 3*hierarchyLevel;
+
+		//Draw the text element
+		drawTextComponent(textElement);
+
+		//Get next element
+		if(!current->collapsed && current->childElement != NULL){
+			current = current->childElement;
+			hierarchyLevel++;
+		}
+		else if(current->nextElement != NULL) current = current->nextElement;
+		else if(current->parentElement != NULL && current->parentElement->nextElement != NULL){
+			current = current->parentElement->nextElement;
+			hierarchyLevel--;
+		}else{
+			break;
+		}
+		actualHeight++;
+		if(actualHeight>=component->real_height) break;
+
+		alternateCounter = alternateCounter == (alternattingPattern-1) ? 0 : alternateCounter+1;
+	}
+	
+	free(stringToPrint);
+
+}
 
 void drawUI(){
 	calculateComponentDimensions(&parentComponent, &parentComponent);
+	//int i = 0/0;
   drawComponent(&parentComponent, NULL);
+	//int i = 0/0;
 }
 
 
@@ -974,9 +1180,30 @@ void preCalculateComponent(Component * component, Component * parent){
 		component->paddingTop = component->tabview_properties.tabHeight;
 	}else if(component->component_type == text_t){
 		preCalculateTextComponent(component);
+	}else if(component->component_type == treeview_t){
+		preCalculateTreeViewComponent(component);
 	}
 
 }
+
+/*Function that pre calculates the elements inside a treeview*/
+void preCalculateTreeViewComponent(Component * component){
+	debug("Preparing treeView");
+	//Change status to idle if not selected but status is selected
+	TreeViewElement * current = component->treeview_properties.child;
+	/*Iterates over every tree element, checking for its status*/
+	while(current != NULL){
+		if(current->status == 2 && current != component->treeview_properties.selectedElement){
+			current->status = 0;
+		}
+		if(current == component->treeview_properties.selectedElement){
+			current->status = 2;
+		}
+		current = getNextTreeViewElement(current, 0);
+	}
+
+}
+
 
 /*Function that pre calculates the text dimensions*/
 void preCalculateTextComponent(Component * component){
@@ -1488,11 +1715,45 @@ Component * newTextComponent(char * text){
 	return cmp;
 }
 
-/*Updates a string permanently*/
-void updateString(char **  origin, char * text){
-	if(*origin != NULL) free(*origin);
-	*origin = malloc(strlen(text));
-	strcpy(*origin, text);
+/*Creates a new TreeViewComponent*/
+Component * newTreeViewComponent(){
+	Component * cmp = newContainer();
+	cmp->component_type = treeview_t;
+	cmp->treeview_properties.nColors = 8;
+	cmp->treeview_properties.colors = malloc(sizeof(Color)*8);
+	cmp->treeview_properties.colors[0] = BG_COLOR_SELECTED;
+	cmp->treeview_properties.colors[1] = FONT_COLOR;
+	cmp->treeview_properties.colors[2] = BG_3_COLOR;
+	cmp->treeview_properties.colors[3] = FONT_3_COLOR;
+	cmp->treeview_properties.colors[4] = BG_2_COLOR;
+	cmp->treeview_properties.colors[5] = FONT_2_COLOR;
+	cmp->treeview_properties.colors[6] = BG_COLOR;
+	cmp->treeview_properties.colors[7] = FONT_2_COLOR;
+
+	cmp->treeview_properties.child = NULL;
+	cmp->treeview_properties.snapElement = 0;
+	cmp->border = 0;
+	cmp->isUpdated = 3;
+
+	return cmp;
+}
+
+/*Creates a treeViewElement*/
+TreeViewElement * newTreeViewElement(TreeViewElement * parent, int isChild){
+	TreeViewElement * elem = malloc(sizeof(TreeViewElement));
+	if(isChild == 0 && parent!=NULL) parent->nextElement = elem;
+	else if(isChild == 1 && parent!=NULL) parent->childElement = elem;
+	elem->nextElement = NULL;
+	elem->childElement = NULL;
+	if(isChild == 1) elem->parentElement = parent;
+	else if(isChild == 0 && parent!= NULL) elem->parentElement = parent->parentElement;
+	if(isChild == 0) elem->prevElement = parent;
+	elem->collapsed = 0;
+	elem->textComponent = newTextComponent("");
+	elem->texts = newStringTable("-");
+	addStringToTable("+", &(elem->texts));
+
+	return elem;
 }
 
 
@@ -1513,6 +1774,11 @@ StringTable newStringTable(char * string){
 	return retTable;
 }
 
+/*******************************************************************/
+/********************* Utility functions **************************/
+/*******************************************************************/
+
+
 /*Function that adds a new string to a table of strings*/
 void addStringToTable(char * string, StringTable * table){
 	char ** auxTable = malloc(sizeof(char *) * (table->length+1));
@@ -1523,4 +1789,38 @@ void addStringToTable(char * string, StringTable * table){
 	strcpy(table->table[table->length], string);
 	debug("Elemento añadido a tabla en %d: %s", table->length, table->table[table->length]);
 	table->length++;
+}
+
+/*Function that return next treeViewElement in order, not caring about height*/
+TreeViewElement * getNextTreeViewElement(TreeViewElement * element, int collapsed){
+	debug("Getting next TreeViewElement of %s", element->texts.table[2]);
+	if(!collapsed && element->childElement != NULL) return element->childElement;
+	else if(element->nextElement != NULL) return element->nextElement;
+	else if(element->parentElement != NULL && element->parentElement->nextElement != NULL) return element->parentElement->nextElement;
+	else return NULL;
+}
+
+/*Function that return previous treeViewElement in order, not caring about height*/
+TreeViewElement * getPrevTreeViewElement(TreeViewElement * element, int careAboutCollapsed){
+	debug("Getting next TreeViewElement of %s", element->texts.table[2]);
+	if(element->prevElement != NULL){
+		if(careAboutCollapsed && element->prevElement->collapsed) return element->prevElement;
+		TreeViewElement * current = element->prevElement->childElement;
+		TreeViewElement * prev = element->prevElement;
+		while(current != NULL){
+			prev = current;
+			current = careAboutCollapsed ? getNextTreeViewElement(prev, current->collapsed): getNextTreeViewElement(prev, 0);
+			if(current == element) break;
+		}
+		return prev;
+	}
+	else if(element->parentElement != NULL) return element->parentElement;
+	else return NULL;
+}
+
+/*Updates a string permanently*/
+void updateString(char **  origin, char * text){
+	if(*origin != NULL) free(*origin);
+	*origin = malloc(strlen(text));
+	strcpy(*origin, text);
 }
