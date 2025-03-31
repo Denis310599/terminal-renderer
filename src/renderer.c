@@ -367,7 +367,7 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 	glUniform3f(lightPosLoc,currentActiveCam.pos.x, currentActiveCam.pos.y, currentActiveCam.pos.z);//8.0f, 8.0f, 2.0f);
 	glUniform3f(objectColorLoc, 1.0f, 0.5f, 0.3f);
 
-	//For everu object we draw it
+	//For every object we draw it
 	ObjectListNode * current = listaObjetos;
 	while(current != NULL){
 		if(current->object.tipo == Malla){	
@@ -580,7 +580,7 @@ int loadModelGPU(Object * modelToLoad){
 
 
 //Function that manages object adition in the scene
-int addObject(Object object){
+Object * addObject(Object object){
 	debug("Adding Objects...");
 	//we get the last Id on the queue, and becouse its stored incrementally,
 	//if the Id to insert is smaller, it for sure will be inserted, otherwise not.
@@ -594,7 +594,7 @@ int addObject(Object object){
 	if(GPU_MODE==1){
 		loadModelGPU(&object);
 	}
-	return ultimoId;
+	return &(listaObjetos->object);
 }
 
 //Function that get an specific Object from the scene
@@ -646,14 +646,14 @@ int updateObject(int id, Object object){
 	}
 }
 
-int deleteObject(int id){
+int deleteObject(Object * obj){
 	ObjectListNode * current = listaObjetos;
 	ObjectListNode * previous = NULL;
 
 	int encontrado = 0;
 	//Searchs for the object in the list with matching id
 	while(current != NULL && !encontrado){
-		if(current->object.id == id){
+		if(&(current->object) == obj){
 			encontrado = 1;
 		}else{
 			previous = current;
@@ -1464,9 +1464,9 @@ Mesh * newMesh(Polygon * polygonArray, int n_polygon, Vector3d scale, Vector3d p
 	Mesh * m = malloc(sizeof(int) + sizeof(Polygon) * n_polygon);
 	for (int i = 0; i < n_polygon; i++){
 		m->polygons[i] = polygonArray[i];
-		m->polygons[i].p1 = vect_element_product(vect_sum(m->polygons[i].p1, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p1, scale), position, 1);
-		m->polygons[i].p2 = vect_element_product(vect_sum(m->polygons[i].p2, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p2, scale), position, 1);
-		m->polygons[i].p3 = vect_element_product(vect_sum(m->polygons[i].p3, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p3, scale), position, 1);
+		m->polygons[i].p1 = m->polygons[i].p1;//vect_element_product(vect_sum(m->polygons[i].p1, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p1, scale), position, 1);
+		m->polygons[i].p2 = m->polygons[i].p2;//vect_element_product(vect_sum(m->polygons[i].p2, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p2, scale), position, 1);
+		m->polygons[i].p3 = m->polygons[i].p3;//vect_element_product(vect_sum(m->polygons[i].p3, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p3, scale), position, 1);
 	}
 	m->n_polygon = n_polygon;
 	return m;

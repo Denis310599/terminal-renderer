@@ -18,7 +18,7 @@
 
 void postProcessFrameToChar(Pixel * frameBuffer, char * output);
 void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in, ViewportSettings * viewport_settins);
-void importStl(char * path, Vector3d scale, Vector3d pos);
+Object * importStl(char * path, Vector3d scale, Vector3d pos);
 void encode_png(unsigned char* raw_data, int width, int height);
 char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen);
 
@@ -169,20 +169,20 @@ void postProcessFrameToChar(Pixel * frameBuffer, char * output){
 }
 
 
-void importStl(char * path, Vector3d scale, Vector3d pos){
+Object * importStl(char * path, Vector3d scale, Vector3d pos){
 	FILE * p_file;
   unsigned char buffer[50*4];
 
 	//Open the file
 	p_file = fopen(path, "r");
 
-	if(p_file == NULL){return;}
+	if(p_file == NULL){return NULL;}
 
 	//Get the file type
 	fread(buffer, sizeof(uint8_t)*80, 1, p_file);
 	printf("Primera palabra: %s\n", buffer);
 	if(strncmp((char *)buffer, "solid", 6) == 0){
-		return;
+		return NULL;
 	}
 	int n_triangulos;	
 
@@ -247,7 +247,7 @@ void importStl(char * path, Vector3d scale, Vector3d pos){
 	//create the mesh
 	Mesh *myMesh = newMesh(polygonArr, n_triangulos, scale, pos);
 	meshObject.p_malla = myMesh;
-	addObject(meshObject);
+	return addObject(meshObject);
 	//Create the object
 	//Return the mesh
 }

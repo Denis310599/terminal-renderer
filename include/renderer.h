@@ -154,11 +154,11 @@ LightListNode * getAllLights();
 int updateLight(int id, Light light);
 int deleteLight(int id);
 
-int addObject(Object object);
+Object * addObject(Object object);
 int getObject(int id, Object * object);
 ObjectListNode * getAllObjects();
 int updateObject(int id, Object object);
-int deleteObject(int id);
+int deleteObject(Object * obj);
 
 Polygon newPolygon(Vector3d p1, Vector3d p2, Vector3d p3, Vector3d normal);
 Mesh * newMesh(Polygon * polygonArray, int m_polygon, Vector3d scale, Vector3d position);
