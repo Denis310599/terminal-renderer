@@ -7,7 +7,6 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "../include/renderer.h"
@@ -183,7 +182,7 @@ void printText(int x, int y, char *text, Color bg, Color fg);
 void updateComponent(Component *component, int resize);
 void markComponentResized(Component *component);
 void markComponentUpdated(Component *component);
-void handle_resize();
+void handle_resize(int a);
 
 void calculateComponentDimensions(Component *component, Component *parent);
 void calculateComponentDimensionsWidth(Component *component, Component *parent);
@@ -220,6 +219,7 @@ TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
                                         int collapsed);
 TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
                                         int careAboutCollapsed);
+void loadNewObject(char * uri, int format);
 
 /*Custom function declaration(aka handlers)*/
 void handleObjectManajerKeyPress(Component *component, char keypress);
@@ -243,6 +243,7 @@ Component parentComponent;
 Component *focusComponent;
 ComponentTable cmpsToUpdate;
 Component *viewport;
+Component * objectTreeView = NULL;
 
 /*Handler deffinition*/
 void handleObjectManajerKeyPress(Component *component, char keypress) {
@@ -273,6 +274,15 @@ void handleObjectManajerKeyPress(Component *component, char keypress) {
     component->tabview_properties.snapTab = 0;
     updateThisCMP = 1;
     break;
+  case 'n':
+    //New object
+    loadNewObject("../assets/teapot.stl", 0);
+
+    TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
+    objectTreeView->treeview_properties.child = treeViewElem;
+    addStringToTable("Object", &(treeViewElem->texts));
+    objectTreeView->treeview_properties.selectedElement = treeViewElem;
+    
   default:
     // Pass to the component controller
     if (component->tabview_properties.selectedTab < component->childCount &&
@@ -404,7 +414,7 @@ void handleDefaultInput(Component *component, char keypress) {
  * format: 0 stl*/
 void loadNewObject(char * uri, int format){
   if(format == 0){
-    //importStl(char *path, int scale, int pos)
+    importStl(uri, (Vector3d){0, 0, 0}, (Vector3d){0, 0, 0});
   }
 }
 
@@ -423,7 +433,7 @@ int main() {
   importStl("../assets/eevee2.stl", (Vector3d){0.03f, 0.03f, 0.03f},
             (Vector3d){-130, 214, 0});
   //importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3},
-   //         (Vector3d){0, 0, 0});
+  //         (Vector3d){0, 0, 0});
   //importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3},
     //        (Vector3d){0, 10, 0});
 
@@ -567,12 +577,13 @@ void initUI() {
   Camera myCam;
   // myCam.pos = (Vector3d){15, 0, 8};
   // myCam.pos = (Vector3d){70, 0, 50};
-  myCam.pos = (Vector3d){10, 0, 3};
-  myCam.dir = (Vector3d){2, 0, 3};
+  myCam.pos = (Vector3d){0, 1, 100};
+  myCam.dir = (Vector3d){0, 0, 1};
   myCam.fov = 45;
   myCam.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, myCam.pos, -1));
   child->viewport_properties.vp_settings->render_settings->active_camera =
       myCam;
+
 
   parentComponent.children[5]->children[0] = child;
   viewport = child;
@@ -625,7 +636,9 @@ void initUI() {
   treeView->parent = tabView->children[0];
   treeView->onKeyPress = handleTreeViewInput;
   treeView->treeview_properties.highlightMode = 1;
+  objectTreeView = treeView;
 
+  /*
   TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
   treeView->treeview_properties.child = treeViewElem;
   addStringToTable("Elemento 1", &(treeViewElem->texts));
@@ -661,6 +674,7 @@ void initUI() {
     childTreeView = newTreeViewElement(childTreeView, 0);
     addStringToTable("y otro hijo", &(childTreeView->texts));
   }
+  */
 
   /*Material tab*/
   tabView->children[1] = newContainer();
@@ -712,7 +726,7 @@ void prepareTerminal() {
   signal(SIGWINCH, handle_resize);
 }
 
-void handle_resize() {
+void handle_resize(int a) {
   debug("Resizing window");
   printf("\033[2J");
   // marco elementos como por updatear
@@ -971,6 +985,7 @@ void drawViewport(Component *component, Component *parent) {
           component->viewport_properties.vp_settings->screen_width,
           component->viewport_properties.vp_settings->screen_height);
   }
+
   if (component->viewport_properties.vp_settings->window == NULL) {
     debug("Initializing viewport");
     vp_init_viewport(component->viewport_properties.vp_settings);
@@ -979,6 +994,8 @@ void drawViewport(Component *component, Component *parent) {
   debug("Drawing viewport");
   debug("%dx, %dy", component->viewport_properties.vp_settings->x,
         component->viewport_properties.vp_settings->y);
+  Camera myCam = component->viewport_properties.vp_settings->render_settings->active_camera;
+  debug("Camera direction: %f, %f, %f", myCam.dir.x, myCam.dir.y, myCam.dir.z);
   vp_render_viewport(component->viewport_properties.vp_settings);
 }
 
@@ -1444,7 +1461,7 @@ void drawTreeView(Component *component) {
 void drawUI() {
   calculateComponentDimensions(&parentComponent, &parentComponent);
   // Add viewport to render
-  // addComponentToTable(viewport, &cmpsToUpdate);
+  addComponentToTable(viewport, &cmpsToUpdate);
   // int i = 0/0;
   for (int i = 0; i < cmpsToUpdate.length; i++) {
     drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent);
