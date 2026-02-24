@@ -202,14 +202,14 @@ GLFWwindow * setUpOpenGL(ViewportSettings * viewport_settings){
 	window = glfwCreateWindow(viewport_settings->screen_width, viewport_settings->screen_height, "Terminal-Renderer", NULL, NULL);
 	if (window == NULL)
 	{
-			printf("Failed to create GLFW window");
+			debug("Failed to create GLFW window");
 			glfwTerminate();
 			return NULL;
 	}
 	glfwMakeContextCurrent(window);
 
 	if(!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)){
-		printf("Failed to initialize GLAD");
+		debug("Failed to initialize GLAD");
 		return NULL;
 	}
 	
@@ -219,7 +219,7 @@ GLFWwindow * setUpOpenGL(ViewportSettings * viewport_settings){
 	shaderProgram = setUpShader("../src/shaders/fragment_shader.frag","../src/shaders/vertex_shader.vert");
 	
 	if(shaderProgram == -1){
-		printf("Error reading and compiling shaders\n");
+		debug("Error reading and compiling shaders\n");
 		return NULL;
 	}
 	viewport_settings->render_settings->shader_program = shaderProgram;
@@ -367,10 +367,60 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 	glUniform3f(lightPosLoc,currentActiveCam.pos.x, currentActiveCam.pos.y, currentActiveCam.pos.z);//8.0f, 8.0f, 2.0f);
 	glUniform3f(objectColorLoc, 1.0f, 0.5f, 0.3f);
 
+
+	unsigned int modelLoc= glGetUniformLocation(viewport_settings->render_settings->shader_program, "model");
+	unsigned int rotationLoc= glGetUniformLocation(viewport_settings->render_settings->shader_program, "rotation");
+	mat4 modelMatrix;
+	mat4 rotationMatrix;
 	//For every object we draw it
 	ObjectListNode * current = listaObjetos;
 	while(current != NULL){
 		if(current->object.tipo == Malla){	
+			glm_mat4_identity(modelMatrix);
+			//Translate
+			glm_translate(modelMatrix, 
+				(vec3){
+					current->object.pos.x,
+					current->object.pos.y,
+					current->object.pos.z,
+					});
+			//Scale
+			glm_scale(modelMatrix, 
+				(vec3){
+					current->object.scale.x,
+					current->object.scale.y,
+					current->object.scale.z,
+					});
+			//rotate
+			//Rotate the model matrix by each axis.
+			// y axis is rotated along x axis
+			// z axis is rotated along x asis and y axis
+			glm_euler_xyz((vec3){deg2rad(current->object.rot.x),
+					deg2rad(current->object.rot.y),
+					deg2rad(current->object.rot.z)},
+					rotationMatrix);
+			//glm_mat4_mul(zRot, yRot, rotationMatrix);
+			//glm_mat4_mul(rotationMatrix, xRot, rotationMatrix);
+			//glm_mat4_mul(yRot, zRot, zRot);
+			//glm_mat4_mul(rotationMatrix, zRot, rotationMatrix);
+			//glm_rotated_y(modelMatrix, current->object.rot.y, modelMatrix);
+
+			//glm_rotated_z(modelMatrix, current->object.rot.z, modelMatrix);
+
+
+			//mat4 yRot;
+			//glm_mat4_identity(yRot);
+			//glm_spin(modelMatrix, current->object.rot.y, (vec3){0, 1, 0});
+			//glm_spin(modelMatrix, current->object.rot.z, (vec3){0, 0, 1});
+			//glm_mat4_mul(yRot, xRot, yRot);
+
+			//glm_mat4_mul(xRot, modelMatrix, modelMatrix);
+			//glm_mat4_mul(yRot, modelMatrix, modelMatrix);
+
+			glUniformMatrix4fv(modelLoc, 1, GL_FALSE, (float *)modelMatrix);
+			glUniformMatrix4fv(rotationLoc, 1, GL_FALSE, (float *)rotationMatrix);
+
+
 			debug("Rendering object with id: %d", current->object.id);
 			glBindVertexArray(current->object.p_malla->VAO);
 			glDrawArrays(GL_TRIANGLES, 0, current->object.p_malla->n_polygon*3);
@@ -474,7 +524,7 @@ void checkCompileShaderErrors(unsigned int shader, char *type){
 			if (!success)
 			{
 					glGetShaderInfoLog(shader, 1024, NULL, infoLog);
-					printf("ERROR::SHADER_COMPILATION_ERROR of type: %s\n%s\n -- --------------------------------------------------- -- ", type, infoLog);
+					debug("ERROR::SHADER_COMPILATION_ERROR of type: %s\n%s\n -- --------------------------------------------------- -- ", type, infoLog);
 			}
 	}
 	else
@@ -483,7 +533,7 @@ void checkCompileShaderErrors(unsigned int shader, char *type){
 			if (!success)
 			{
 					glGetProgramInfoLog(shader, 1024, NULL, infoLog);
-					printf("ERROR::PROGRAM_LINKING_ERROR of type: %s\n%s\n -- --------------------------------------------------- -- ", type, infoLog);
+					debug("ERROR::PROGRAM_LINKING_ERROR of type: %s\n%s\n -- --------------------------------------------------- -- ", type, infoLog);
 			}
 	}
 }

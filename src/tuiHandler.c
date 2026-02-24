@@ -8,6 +8,7 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+#include "../include/cglm/cglm.h"
 
 #include "../include/renderer.h"
 #include "../include/viewport.h"
@@ -244,11 +245,14 @@ Component *focusComponent;
 ComponentTable cmpsToUpdate;
 Component *viewport;
 Component * objectTreeView = NULL;
+TreeViewElement * selectedTreeElem;
+Object * selectedObject;
 
 /*Handler deffinition*/
 void handleObjectManajerKeyPress(Component *component, char keypress) {
   debug("Handling keypress in ObjectManager");
   int updateThisCMP = 0;
+  Component * selectedCmp;
   switch (keypress) {
   case '3':
     component->tabview_properties.selectedTab ==
@@ -277,11 +281,123 @@ void handleObjectManajerKeyPress(Component *component, char keypress) {
   case 'n':
     //New object
     loadNewObject("../assets/teapot.stl", 0);
+    break;
+  case (char) 255:
+    //Up
+  case (char) 254:
+    //Down
+  case (char) 253:
+    // Right
+  case (char) 252:
+    // Left
+    //Grab the object to update
+    debug("Handling arrow press in ObjectManager: %d", keypress);
+    selectedCmp = component->children[component->tabview_properties.selectedTab]->children[0];
+    debug("Current selected tab cmp: %d", selectedCmp); 
 
-    TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
-    objectTreeView->treeview_properties.child = treeViewElem;
-    addStringToTable("Object", &(treeViewElem->texts));
-    objectTreeView->treeview_properties.selectedElement = treeViewElem;
+    // selectedElement->data = void *
+    selectedTreeElem = selectedCmp->treeview_properties.selectedElement;
+    debug("Current selected tree element: %d", selectedTreeElem); 
+    selectedObject = (Object *) selectedTreeElem->data;
+    debug("Moving selected object: %d", selectedObject);
+    //Object * selectedObject = selectedCmp->treeview_properties.selectedElement.data;
+    switch (keypress){
+      case (char) 255: selectedObject->pos.y -= 1; break;
+      case (char) 254: selectedObject->pos.y += 1; break;
+      case (char) 253: selectedObject->pos.x += 1; break;
+      case (char) 252: selectedObject->pos.x -= 1; break;
+      default: ;
+    }
+    break;
+  case 'w':
+  case 'a':
+  case 's':
+  case 'd':
+  case 'A':
+  case 'D':
+    //Grab the object to update
+    debug("Handling arrow press in ObjectManager: %d", keypress);
+    selectedCmp = component->children[component->tabview_properties.selectedTab]->children[0];
+    debug("Current selected tab cmp: %d", selectedCmp); 
+
+    // selectedElement->data = void *
+    selectedTreeElem = selectedCmp->treeview_properties.selectedElement;
+    debug("Current selected tree element: %d", selectedTreeElem); 
+    selectedObject = (Object *) selectedTreeElem->data;
+    debug("Scaling selected object: %d", selectedObject);
+    //Object * selectedObject = selectedCmp->treeview_properties.selectedElement.data;
+    //
+    //Calculate the current rotation matrix oldRot
+    mat4 rotationMatrix;
+    glm_euler_xyz((vec3){deg2rad(selectedObject->rot.x),
+                    deg2rad(selectedObject->rot.y),
+                    deg2rad(selectedObject->rot.z)},
+                    rotationMatrix);
+    vec3 axis;
+    float angle = 10.0f;
+    //Get the axis to spin around
+    switch (keypress){
+      case 'w': 
+        axis[0] = 1;
+        axis[1] = 0;
+        axis[2] = 0;
+        break;
+      case 's': 
+        axis[0] = 1;
+        axis[1] = 0;
+        axis[2] = 0;
+        angle *= -1.0f;
+        break;
+      case 'a': 
+        axis[0] = 0;
+        axis[1] = 1;
+        axis[2] = 0;
+        angle *= -1.0f;
+        break;
+      case 'd': 
+        axis[0] = 0;
+        axis[1] = 1;
+        axis[2] = 0;
+        break;
+      case 'A': 
+        axis[0] = 0;
+        axis[1] = 0;
+        axis[2] = 1;
+        angle *= -1.0f;
+        break;
+      case 'D': 
+        axis[0] = 0;
+        axis[1] = 0;
+        axis[2] = 1;
+        break;
+      default: ;
+    }
+
+    //Make the rotation along the specified axis;
+
+    //Calculate the delta rotation matrix newRot
+    mat4 deltaRotation;
+    glm_rotate_make(deltaRotation, deg2rad(angle), axis);
+
+
+    //Calculate the new rotation matrix newRot*newRot
+    mat4 finalRotation;
+    glm_mat4_mul(rotationMatrix, deltaRotation, finalRotation);
+
+    vec3 finalAngles;
+    glm_euler_angles(finalRotation, finalAngles);
+    selectedObject->rot.x = rad2deg(finalAngles[0]);
+    selectedObject->rot.y = rad2deg(finalAngles[1]);
+    selectedObject->rot.z = rad2deg(finalAngles[2]);
+
+    /*printf(" %.2fx, %.2fy, %.2fz        \n", selectedObject->rot.x, 
+        selectedObject->rot.y,
+      selectedObject->rot.z);
+    printf(" %.2fx, %.2fy, %.2fz       \n", axis[0], 
+        axis[1],
+        axis[2]);*/
+    break;
+
     
   default:
     // Pass to the component controller
@@ -327,6 +443,7 @@ void handleTreeViewInput(Component *component, char keypress) {
       // Previous sibling
       TreeViewElement *possibleNextElement = getPrevTreeViewElement(
           component->treeview_properties.selectedElement, 2);
+      debug("Next Element: %d", possibleNextElement);
       if (possibleNextElement != NULL &&
           possibleNextElement->parentElement ==
               component->treeview_properties.selectedElement->parentElement)
@@ -348,6 +465,7 @@ void handleTreeViewInput(Component *component, char keypress) {
       // Next sibling
       TreeViewElement *possibleNextelement = getNextTreeViewElement(
           component->treeview_properties.selectedElement, 1);
+      debug("Next Element: %d", possibleNextelement);
       if (possibleNextelement != NULL &&
           possibleNextelement->parentElement ==
               component->treeview_properties.selectedElement->parentElement)
@@ -413,9 +531,40 @@ void handleDefaultInput(Component *component, char keypress) {
  * uri: path to the object
  * format: 0 stl*/
 void loadNewObject(char * uri, int format){
+  debug("Loading new object: %s", uri);
+  Object * createdObject;
   if(format == 0){
-    importStl(uri, (Vector3d){0, 0, 0}, (Vector3d){0, 0, 0});
+    createdObject = importStl(uri, (Vector3d){1, 1, 1}, (Vector3d){0, 0, 0});
   }
+
+
+  debug("Object created: %d", createdObject);
+  if(createdObject == NULL) return;
+  debug("Object imported! Adding object to object manager");
+
+  
+  //Add element to top of the object manager
+  //TODO: Move this to a new function
+  TreeViewElement * treeViewElem = newTreeViewElement(NULL, 0);
+  if (objectTreeView->treeview_properties.child == NULL){
+    objectTreeView->treeview_properties.child = treeViewElem;
+  }else{
+    //First item has new previous
+    objectTreeView->treeview_properties.child->prevElement = treeViewElem;
+    objectTreeView->treeview_properties.child->status = 0;
+    objectTreeView->treeview_properties.child->parentElement = NULL;
+    //New inserted item has the previous first as next
+    treeViewElem->nextElement = objectTreeView->treeview_properties.child;
+    //The new object base child has changed
+    objectTreeView->treeview_properties.child = treeViewElem;
+  }
+
+  addStringToTable("Object", &(treeViewElem->texts));
+  treeViewElem->data = createdObject;
+  objectTreeView->treeview_properties.selectedElement = treeViewElem;
+
+  //Udate the tree view to add this new item
+  updateComponent(objectTreeView, 0);
 }
 
 /*Here starts the Library related functions*/
@@ -430,8 +579,8 @@ int main() {
   // viewport.y = 5;
 
   // Define the camera
-  importStl("../assets/eevee2.stl", (Vector3d){0.03f, 0.03f, 0.03f},
-            (Vector3d){-130, 214, 0});
+  //loadNewObject("../assets/eevee2.stl", 0);
+  //(Vector3d){-130, 214, 0});
   //importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3},
   //         (Vector3d){0, 0, 0});
   //importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3},
@@ -577,7 +726,7 @@ void initUI() {
   Camera myCam;
   // myCam.pos = (Vector3d){15, 0, 8};
   // myCam.pos = (Vector3d){70, 0, 50};
-  myCam.pos = (Vector3d){0, 1, 100};
+  myCam.pos = (Vector3d){0, 50, 50};
   myCam.dir = (Vector3d){0, 0, 1};
   myCam.fov = 45;
   myCam.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, myCam.pos, -1));
@@ -813,10 +962,23 @@ int handleInput() {
   char ch;
   if (read(STDIN_FILENO, &ch, 1) > 0) {
     debug("Char presser: %c", ch);
-    if (ch == 'q') {
-      // Process closing
-      closeProgram();
-      return 1;
+    switch (ch) {
+      case 'q': 
+        // Process closing
+        closeProgram();
+        return 1;
+        break;
+      case '[':
+        if (read(STDIN_FILENO, &ch, 1) == 0) return 0;
+        debug("Char presser: %c", ch);
+        switch (ch){ // Up, Down, Right, Left
+          case 'A': focusComponent->onKeyPress(focusComponent, (char) 255); break;
+          case 'B': focusComponent->onKeyPress(focusComponent, (char) 254); break;
+          case 'C': focusComponent->onKeyPress(focusComponent, (char) 253); break;
+          case 'D': focusComponent->onKeyPress(focusComponent, (char) 252); break;
+        }
+        return 0;
+        break;
     }
     // Pass the event to the focused component
     focusComponent->onKeyPress(focusComponent, ch);

@@ -170,6 +170,7 @@ void postProcessFrameToChar(Pixel * frameBuffer, char * output){
 
 
 Object * importStl(char * path, Vector3d scale, Vector3d pos){
+	debug("Importing STL: %s", path);
 	FILE * p_file;
   unsigned char buffer[50*4];
 
@@ -180,7 +181,7 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 
 	//Get the file type
 	fread(buffer, sizeof(uint8_t)*80, 1, p_file);
-	printf("Primera palabra: %s\n", buffer);
+	debug("Primera palabra: %s\n", buffer);
 	if(strncmp((char *)buffer, "solid", 6) == 0){
 		return NULL;
 	}
@@ -188,11 +189,11 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 
 	//Get polygon count
 	fread(buffer, sizeof(uint32_t), 1, p_file);
-	printf("0x%02x 0x%02x 0x%02x 0x%02x \n", buffer[0], buffer[1], buffer[2], buffer[3]);	
-	printf("%d %d %d %d \n", buffer[0], buffer[1], buffer[2], buffer[3]);	
+	debug("0x%02x 0x%02x 0x%02x 0x%02x \n", buffer[0], buffer[1], buffer[2], buffer[3]);	
+	debug("%d %d %d %d \n", buffer[0], buffer[1], buffer[2], buffer[3]);	
 	//int n_triangulos = 256*256*256*buffer[0] + 256*256*buffer[1] + 256*buffer[2] + 1*buffer[3];
 	memcpy(&n_triangulos, &buffer[0], sizeof(int));
-	printf("Numero de triangulos: %d\n", n_triangulos);
+	debug("Numero de triangulos: %d\n", n_triangulos);
 
 	Polygon *polygonArr = malloc(n_triangulos*sizeof(Polygon));
 	
@@ -211,11 +212,11 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 	for (int triangle_index = 0; triangle_index<n_triangulos; triangle_index++){
 		leido = fread(buffer, sizeof(unsigned char), 50, p_file);
 		if(leido!=50){
-			printf("Leidos %d triangulos", triangle_index);
+			debug("Leidos %d triangulos", triangle_index);
 			break;
 		}
-		//printf("Leido: %d\n", leido);
-		//printf("Triangulo %d\n", triangle_index);
+		//debug("Leido: %d\n", leido);
+		//debug("Triangulo %d\n", triangle_index);
 
 		for(int  point_index = 0; point_index<4; point_index++){
 			memcpy(&x_coord, &buffer[point_index*12], sizeof(float));
@@ -228,7 +229,7 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 				//addObject(meshObject);
 				point[point_index] = (Vector3d){x_coord, y_coord, z_coord};
 			}
-			//printf("Punto %d: x %f y %f z %f\n", point_index, x_coord, y_coord, z_coord);
+			//debug("Punto %d: x %f y %f z %f\n", point_index, x_coord, y_coord, z_coord);
 		}
 
 		point[0] = normalizeVector(vectProd(vect_sum(point[1], point[3], -1), vect_sum(point[2], point[3], -1)));
@@ -242,11 +243,14 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 		polygonArr[triangle_index] = newPolygon(point[1], point[2], point[3], point[0]);
 		//break;
 	}
-	printf("Center of Object: x %f y %f z %f", meanPosition.x, meanPosition.y, meanPosition.z);
+	debug("Center of Object: x %f y %f z %f", meanPosition.x, meanPosition.y, meanPosition.z);
 	//getchar();
 	//create the mesh
 	Mesh *myMesh = newMesh(polygonArr, n_triangulos, scale, pos);
 	meshObject.p_malla = myMesh;
+	meshObject.pos = pos;
+	meshObject.scale = scale;
+	meshObject.rot = (Vector3d){0, 0, 0};
 	return addObject(meshObject);
 	//Create the object
 	//Return the mesh
