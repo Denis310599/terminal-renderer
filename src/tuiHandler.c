@@ -113,6 +113,8 @@ typedef struct Component {
   int maxWidth;
   int minWidth;
   int isUpdated;
+  int calculatedMaxHeight;
+  int calculatedMaxWidth;
 
   // Dynamic positioning
   struct Component *topToTopOf;
@@ -138,9 +140,9 @@ typedef struct Component {
 
   // Dynamic sizing
   int autoHeight; // 0 noAuto, 1 fitContent, 2 fitSpace, 3 percentaje
-  float heightBias;
-  int autoWidth;
-  float widthBias;
+  float heightBias; // Percentage of height. -1 if want default value.
+  int autoWidth; // 0 noAuto, 1 fitContent, 2 fitSpace, 3 percentaje
+  float widthBias; // Percentage of width. -1 if default value.
 
   // Function handlers
   void (*onKeyPress)(struct Component *, char keypress);
@@ -190,7 +192,7 @@ void calculateComponentDimensionsWidth(Component *component, Component *parent);
 void calculateComponentDimensionsHeight(Component *component,
                                         Component *parent);
 void preCalculateComponent(Component *component, Component *parent);
-void preCalculateTextComponent(Component *component);
+void calculateTextComponent(Component *component);
 void preCalculateTreeViewComponent(Component *component);
 
 Component *newContainer();
@@ -626,6 +628,7 @@ void initUI() {
   child->marginTop = 0;
   child->startToStartOf = &parentComponent;
   child->endToEndOf = &parentComponent;
+  child->autoHeight = 0;
   child->height = 2;
   // child->real_width = 3;
   child->autoWidth = 2;
@@ -635,6 +638,20 @@ void initUI() {
 
   parentComponent.children = malloc(6 * sizeof(Component *));
   parentComponent.children[0] = child;
+
+  Component * text = newTextComponent("jiji asd asdasd asd asdasd asd asd asdasd asdasdasdasdasd");
+  text->topToTopOf = child;
+  text->startToStartOf = child;
+  //text->autoWidth = 2;
+  //text->autoHeight = 2;
+  //text->height = 5;
+  text->margin = 0;
+  text->border = 0;
+  text->text_properties.bgColor = BG_4_COLOR;
+  child->childCount = 1;
+  child->children = malloc(sizeof(Component*));
+  child->children[0] = text;
+
 
   /*Status bar container*/
   child = newContainer();
@@ -690,6 +707,16 @@ void initUI() {
   child->autoHeight = 0;
   child->backgroundColor = BG_2_COLOR;
   child->border = 0;
+
+  Component * text2 = newTextComponent("Modes");
+  text2->topToTopOf = child;
+  //text->bottomToBottomOf = child;
+  //text->endToEndOf = child;
+  text2->startToStartOf = child;
+  text2->text_properties.bgColor = BG_2_COLOR;
+  child->childCount = 1;
+  child->children = malloc(sizeof(Component*));
+  child->children[0] = text2;
 
   parentComponent.children[4] = child;
 
@@ -849,7 +876,7 @@ void initUI() {
   text1->autoWidth = 1;
   text1->margin = 5;
   text1->text_properties.oneLine = 0;
-  // text1->width = 25;
+  // text1->width = 25; 
   matCont->children[0] = text1;
 
   focusComponent = objectContainer->children[0];
@@ -1295,6 +1322,7 @@ void drawTabView(Component *component, Component *parent) {
 
 /*Function that draws a text component*/
 void drawTextComponent(Component *component) {
+  debug("Drawing text component");
   if (component->isUpdated != 0) {
     component->isUpdated--;
     debug("Printing text %s in text of size %dx %dy. Len: %d",
@@ -1309,6 +1337,7 @@ void drawTextComponent(Component *component) {
     int wordOffset = 0;
     int lineOffset = 0;
     int firstWord = 1;
+    int maxWidth = 0;
     // Calculate string height
     for (int i = 0; i < strlen(stringToPrint) + 1; i++) {
       // For every letter, store each word, and if it fits in width, print it
@@ -1344,8 +1373,13 @@ void drawTextComponent(Component *component) {
           // Store word in next line
           debug("New line jump for word: %s", wordToPrint);
           calculatedHeight++;
+          if (lineOffset > maxWidth){
+            maxWidth = lineOffset;
+            debug("New max width = %d", maxWidth);
+          }
+
           // If next line is over the limit, put '...'
-          if (calculatedHeight > component->real_height) {
+          if (calculatedHeight > component->real_height || calculatedHeight > component->parent->real_height) {
             int remainingSpace = component->real_width - lineOffset;
             if (!firstWord && remainingSpace > 0)
               strcat(finalString, " ");
@@ -1369,6 +1403,7 @@ void drawTextComponent(Component *component) {
         if (stringToPrint[i] == '\n' || stringToPrint[i] == '\r') {
           strncat(finalString, stringToPrint + i, 1);
           calculatedHeight++;
+          if (lineOffset > maxWidth) maxWidth = lineOffset;
           wordOffset = 0;
           lineOffset = 0;
           firstWord = 1;
@@ -1388,8 +1423,20 @@ void drawTextComponent(Component *component) {
       // If word too long, split it with '-'
     }
 
-    component->global_x = component->x + component->parent->global_x;
-    component->global_y = component->y + component->parent->global_y;
+    int start_x = component->x + component->parent->global_x;
+    int preliminar_width = component->real_width;
+
+    //component->global_x = start_x + (int)((preliminar_width - maxWidth)/2);
+    component->global_x = start_x;
+    debug("Preliminar width = %d", preliminar_width);
+    debug("maxWidth = %d", maxWidth);
+    
+    int start_y = component->y + component->parent->global_y;
+    int preliminar_height = component->real_height;
+
+    //component->global_y = start_y + (int)((preliminar_height - calculatedHeight)/2);
+    component->global_y = start_y;
+
 
     int init_line = 0;
     int line_index = 0;
@@ -1623,7 +1670,7 @@ void drawTreeView(Component *component) {
 void drawUI() {
   calculateComponentDimensions(&parentComponent, &parentComponent);
   // Add viewport to render
-  addComponentToTable(viewport, &cmpsToUpdate);
+  //addComponentToTable(viewport, &cmpsToUpdate);
   // int i = 0/0;
   for (int i = 0; i < cmpsToUpdate.length; i++) {
     drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent);
@@ -1647,7 +1694,7 @@ void preCalculateComponent(Component *component, Component *parent) {
   if (component->component_type == tabview_t) {
     component->paddingTop = component->tabview_properties.tabHeight;
   } else if (component->component_type == text_t) {
-    preCalculateTextComponent(component);
+    //calculateTextComponent(component);
   } else if (component->component_type == treeview_t) {
     preCalculateTreeViewComponent(component);
   }
@@ -1674,20 +1721,15 @@ void preCalculateTreeViewComponent(Component *component) {
 }
 
 /*Function that pre calculates the text dimensions*/
-void preCalculateTextComponent(Component *component) {
+void calculateTextComponent(Component *component) {
+  debug("Calculating text component size");
+  debug("H: %d, W: %d", component->real_height, component->real_width);
   /*IF fit content only width: width = calculated on draw
    *IF fit content only height: calculated on draw
    *IF fit content width AND height: width = string length
    */
 
   if (component->text_properties.oneLine == 0) {
-    if (component->autoWidth != 1) {
-      // Calculate width
-      calculateComponentDimensionsWidth(component, component->parent);
-    } else {
-      component->real_width = 999999;
-    }
-
     int longestSentence = 0;
     char *stringToPrint = component->text_properties.content;
     // char * wordToPrint = malloc(sizeof(char) * strlen(stringToPrint));
@@ -1753,26 +1795,24 @@ void preCalculateTextComponent(Component *component) {
       }
     }
 
-    component->height = calculatedHeight;
-    component->autoHeight = 0;
+    component->real_height = calculatedHeight;
+    component->real_width = longestSentence;
     debug("Calculated Height: %d", calculatedHeight);
-    if (component->autoWidth == 1) {
-      debug("Calculated Width: %d", longestSentence);
-      component->width = longestSentence;
-      component->autoWidth = 0;
-      component->real_width = -1;
-    }
-    // int i = 0/0;
+    debug("Calculated Width: %d", longestSentence);
   } else {
     component->height = 1;
-    component->autoHeight = 0;
+    component->real_width = strlen(component->text_properties.content)-1;
+
+    //component->autoHeight = 0;
   }
 }
 
 /*Function that calculates component dimensions and populates its properties*/
 void calculateComponentDimensions(Component *component, Component *parent) {
-  if (component->real_height != -1 && component->real_width != -1)
+  if (component->real_height != -1 && component->real_width != -1){
     return;
+  }
+
   debug("Calculando componente con id %d", component);
   preCalculateComponent(component, parent);
 
@@ -1789,6 +1829,8 @@ void calculateComponentDimensions(Component *component, Component *parent) {
     if (component->children[i]->real_height == -1 ||
         component->children[i]->real_width == -1)
       calculateComponentDimensions(component->children[i], component);
+    else
+      debug("Size already calculated");
   }
 }
 
@@ -1815,30 +1857,6 @@ void calculateComponentDimensionsHeight(Component *component,
   int min_y = -1;
   int max_y = -1;
 
-  if (component == &parentComponent) {
-    debug("Component is parent");
-    component->real_height = component->height;
-  } else if (component->autoHeight == 1) {
-    debug("Height dependant on childs");
-    // Height dependant on children height
-    component->real_height = 0;
-    int auxHeight = 0;
-    int maxHeight = 0;
-    for (int i = component->childCount - 1; i >= 0; i--) {
-      Component *child = component->children[i];
-      if (child->real_height == -1)
-        calculateComponentDimensionsHeight(child, component);
-      int auxMargin = 0;
-      auxMargin += child->marginBot == -1 ? child->margin : child->marginBot;
-      auxHeight = child->y + child->real_height + auxMargin;
-      maxHeight = maxHeight < auxHeight ? auxHeight : maxHeight;
-      maxHeight += componentPaddingBot;
-    }
-    component->real_height = maxHeight;
-    debug("  Height: %d", maxHeight);
-  } else {
-    component->real_height = component->height;
-  }
 
   // Calculate the max and min coords of location
   // Top of component
@@ -1904,6 +1922,42 @@ void calculateComponentDimensionsHeight(Component *component,
     // max_y = component->real_height + min_y;
   }
   debug("max_y = %d", max_y);
+
+
+  if (component == &parentComponent) {
+    debug("Component is parent");
+    component->real_height = component->height;
+  } else if (component->autoHeight == 1) {
+    if (component->component_type == text_t){
+      calculateTextComponent(component);
+        if (component->real_height < (min_y - min_y)){
+          max_y = min_y + component->real_height;
+        }
+      //component->real_height = component->real_height > (parent->real_height - 2) ? parent->real_height-2 : component->real_height;
+    }else{
+      debug("Height dependant on childs");
+      // Height dependant on children height
+      component->real_height = 0;
+      int auxHeight = 0;
+      int maxHeight = 0;
+      for (int i = component->childCount - 1; i >= 0; i--) {
+        Component *child = component->children[i];
+        if (child->real_height == -1)
+          calculateComponentDimensionsHeight(child, component);
+        int auxMargin = 0;
+        auxMargin += child->marginBot == -1 ? child->margin : child->marginBot;
+        auxHeight = child->y + child->real_height + auxMargin;
+        maxHeight = maxHeight < auxHeight ? auxHeight : maxHeight;
+        maxHeight += componentPaddingBot;
+      }
+
+      component->real_height = maxHeight;
+      debug("  Height: %d", maxHeight);
+    }
+  } else {
+    component->real_height = component->height;
+  }
+
 
   // Top not deffined but buttom is -> stick to bottom (Need to know the height)
   // Bottom not deffinned but top is -> Stick to top (Need to know height)
@@ -1978,6 +2032,7 @@ void calculateComponentDimensionsHeight(Component *component,
 void calculateComponentDimensionsWidth(Component *component,
                                        Component *parent) {
 
+
   debug("Calculando componente con id %d", parent);
   // Skips this one if it's position depends on his parent height and it's not
   // yet been calculated
@@ -1996,31 +2051,6 @@ void calculateComponentDimensionsWidth(Component *component,
   int min_x = -1;
   int max_x = -1;
 
-  if (component == &parentComponent) {
-    debug("Component is parent");
-    component->real_width = component->width;
-  } else if (component->autoWidth == 1) {
-    debug("Height dependant on childs");
-    // Height dependant on children height
-    component->real_width = 0;
-    int auxHeight = 0;
-    int maxHeight = 0;
-    for (int i = component->childCount - 1; i >= 0; i--) {
-      Component *child = component->children[i];
-      if (child->real_height == -1)
-        calculateComponentDimensionsWidth(child, component);
-      int auxMargin = 0;
-      auxMargin += child->marginBot == -1 ? child->margin : child->marginBot;
-      auxHeight = child->y + child->real_height + auxMargin;
-      maxHeight = maxHeight < auxHeight ? auxHeight : maxHeight;
-      maxHeight += componentPaddingEnd;
-    }
-    component->real_width = maxHeight;
-    debug("  Height: %d", maxHeight);
-  } else {
-    component->real_width = component->width;
-  }
-
   // Calculate the max and min coords of location
   // Top of component
   if (component->startToStartOf != NULL &&
@@ -2028,16 +2058,16 @@ void calculateComponentDimensionsWidth(Component *component,
     if (component->startToStartOf->real_width == -1) {
       calculateComponentDimensionsWidth(component->startToStartOf, parent);
     }
-    min_x = component->startToStartOf->y + componentMarginStart;
+    min_x = component->startToStartOf->x + componentMarginStart;
   } else if (component->startToEndOf != NULL) {
     if (component->startToEndOf->real_width == -1) {
       calculateComponentDimensionsWidth(component->startToEndOf, parent);
     }
     if (component->startToEndOf == parent) {
-      min_x = component->startToEndOf->real_height;
+      min_x = component->startToEndOf->real_width;
     } else {
       min_x =
-          component->startToEndOf->x + component->startToEndOf->real_height + 1;
+          component->startToEndOf->x + component->startToEndOf->real_width + 1;
     }
     min_x += componentMarginStart;
   } else if (component->endToEndOf == NULL && component->endToEndOf == NULL ||
@@ -2081,9 +2111,93 @@ void calculateComponentDimensionsWidth(Component *component,
     }
     max_x = auxHeight < 0 ? 0 : auxHeight;
   } else if (min_x != -1) {
-    // max_y = component->real_height + min_y;
+    //max_x = component->parent->real_width + min_x;
   }
   debug("max_x = %d", max_x);
+
+
+  if (component == &parentComponent) {
+    debug("Component is parent");
+    component->real_width = component->width;
+  } else if (component->autoWidth == 1) {
+    debug("Width dependant on childs");
+    // Height dependant on children height
+    component->real_width = 0;
+    int auxHeight = 0;
+    int maxHeight = 0;
+    for (int i = component->childCount - 1; i >= 0; i--) {
+      Component *child = component->children[i];
+      int auxMargin = 0;
+      auxMargin += child->marginBot == -1 ? child->margin : child->marginBot;
+
+      //If it's a text, precalculate the text size
+      if (child->component_type == text_t && (child->autoWidth == 1 || child->autoWidth == 2)){
+        int auxTextWidth;
+        int auxParentWidth;
+
+        int oneLine = child->text_properties.oneLine;
+        child->text_properties.oneLine = 1;
+        // Get max width of text component
+        calculateTextComponent(child);
+        auxTextWidth = child->real_width;
+
+        //If it's a text component, calculate width assuming auto_width = 2 on parent
+        if (max_x == -1 || min_x == -1)
+           auxParentWidth = auxTextWidth;
+        else
+           auxParentWidth = max_x - min_x - 2;
+        
+        //Get the smallest of both
+        auxHeight = auxTextWidth > auxParentWidth ? auxParentWidth : auxTextWidth;
+        child->text_properties.oneLine = oneLine;
+        child->real_width = -1;
+        child->real_height = -1;
+
+      }else{
+        if (child->real_height == -1) calculateComponentDimensionsWidth(child, component);
+        auxHeight = child->y + child->real_height + auxMargin;
+      }
+      maxHeight = maxHeight < auxHeight ? auxHeight : maxHeight;
+      maxHeight += componentPaddingEnd;
+
+    }
+
+    //If it's a text with autoWidth == 1, get the min of available space or string size
+    if (component->component_type == text_t){
+      // We set the top at the maximun, and also the max size
+      component->x = min_x;
+
+      if (min_x == -1){
+        min_x = 0;
+      }
+      if (max_x == -1){
+        max_x = min_x + component->parent->real_width;
+      }
+
+      component->real_width = max_x - min_x;
+      // Adjust size according to bias
+      component->real_width *=
+          component->widthBias != -1 ? component->widthBias : 1;
+
+
+      calculateTextComponent(component);
+      component->real_height = -1;
+      if (component->real_width < (max_x - min_x)){
+        max_x = min_x + component->real_width;
+      }
+
+      // Both are deffined, we get the middle point (or biased)
+      float auxBias = component->xBias != -1 ? component->xBias * 2 : 1;
+      if (component != &parentComponent)
+        component->x =
+            min_x + auxBias * (max_x - min_x - component->real_width) / 2.0f;
+      }else{
+        component->real_width = maxHeight;
+      }
+  } else {
+    component->real_width = component->width;
+  }
+
 
   // Top not deffined but buttom is -> stick to bottom (Need to know the height)
   // Bottom not deffinned but top is -> Stick to top (Need to know height)
@@ -2133,6 +2247,7 @@ void calculateComponentDimensionsWidth(Component *component,
   }
   debug("Final width component %d: %d", parent, component->real_width);
   debug("Final x component %d: %d", parent, component->x);
+  component->calculatedMaxWidth = component->real_width;
 }
 
 /*******************************************************************/
@@ -2226,10 +2341,14 @@ Component *newTextComponent(char *text) {
   cmp->component_type = text_t;
   // cmp->text_properties.content = malloc(sizeof(char) * strlen(text));
   // strcpy(cmp->text_properties.content, text);
+  cmp->height = -1;
+  cmp->width = -1;
+  cmp->autoWidth = 1;
+  cmp->autoHeight = 1;
   cmp->text_properties.content = text;
   cmp->text_properties.bgColor = BG_COLOR;
   cmp->text_properties.textColor = FONT_COLOR;
-
+  cmp->text_properties.oneLine = 0;
   return cmp;
 }
 
