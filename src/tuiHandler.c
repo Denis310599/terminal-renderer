@@ -147,6 +147,10 @@ typedef struct Component {
   // Function handlers
   void (*onKeyPress)(struct Component *, char keypress);
 
+  //Hint
+  char * modeHint;
+  char * actionHint;
+
   // Appearance
   int border; // 0 no border, 1 normal border, 2 big border
   Color backgroundColor;
@@ -186,6 +190,7 @@ void updateComponent(Component *component, int resize);
 void markComponentResized(Component *component);
 void markComponentUpdated(Component *component);
 void handle_resize(int a);
+int calculateHintMessages(Component * component, StringTable * modeHint, StringTable * actionHint, int alreadyFound);
 
 void calculateComponentDimensions(Component *component, Component *parent);
 void calculateComponentDimensionsWidth(Component *component, Component *parent);
@@ -249,6 +254,8 @@ Component *viewport;
 Component * objectTreeView = NULL;
 TreeViewElement * selectedTreeElem;
 Object * selectedObject;
+Component * actionHintsComponent;
+Component * modeHintsComponent;
 
 /*Handler deffinition*/
 void handleObjectManajerKeyPress(Component *component, char keypress) {
@@ -639,7 +646,9 @@ void initUI() {
   parentComponent.children = malloc(6 * sizeof(Component *));
   parentComponent.children[0] = child;
 
-  Component * text = newTextComponent("jiji asd asdasd asd asdasd asd asd asdasd asdasdasdasdasd");
+  Component * text = newTextComponent("Actions");
+  actionHintsComponent = text;
+  actionHintsComponent->parent = child;
   text->topToTopOf = child;
   text->startToStartOf = child;
   //text->autoWidth = 2;
@@ -647,7 +656,7 @@ void initUI() {
   //text->height = 5;
   text->margin = 0;
   text->border = 0;
-  text->text_properties.bgColor = BG_4_COLOR;
+  //text->text_properties.bgColor = BG_4_COLOR;
   child->childCount = 1;
   child->children = malloc(sizeof(Component*));
   child->children[0] = text;
@@ -709,6 +718,8 @@ void initUI() {
   child->border = 0;
 
   Component * text2 = newTextComponent("Modes");
+  modeHintsComponent = text2;
+  text2->parent = child;
   text2->topToTopOf = child;
   //text->bottomToBottomOf = child;
   //text->endToEndOf = child;
@@ -812,6 +823,8 @@ void initUI() {
   treeView->parent = tabView->children[0];
   treeView->onKeyPress = handleTreeViewInput;
   treeView->treeview_properties.highlightMode = 1;
+  treeView->actionHint = "hjkl) Navitate tree view";
+  treeView->modeHint = "t) Translate  r) Rotate  q) Scale";
   objectTreeView = treeView;
 
   /*
@@ -862,6 +875,8 @@ void initUI() {
   tabView->children[1]->autoWidth = 2;
   tabView->children[1]->border = 1;
   tabView->children[1]->backgroundColor = BG_COLOR;
+  tabView->children[1]->actionHint = "";
+  tabView->children[1]->modeHint = "";
 
   /*Material tab content*/
   Component *matCont = tabView->children[1];
@@ -1668,17 +1683,163 @@ void drawTreeView(Component *component) {
 }
 
 void drawUI() {
-  calculateComponentDimensions(&parentComponent, &parentComponent);
+  int updatingHints = 0;
+
+  if (cmpsToUpdate.length > 0){
+    debug("There are components to update");
+    updatingHints = 1;
+    calculateHintMessages(NULL, NULL, NULL, 0);
+
+    calculateComponentDimensions(&parentComponent, &parentComponent);
+    
+    //TODO: Change this draw component for the actual search of the component on focus
+    // Must make a function that recursively search for the focused component and builds the hints
+    // Seach by pointer reference
+    //drawComponent(focusComponent, focusComponent->parent);
+
+  }
+
+  //addComponentToTable(&parentComponent, &cmpsToUpdate);
   // Add viewport to render
   //addComponentToTable(viewport, &cmpsToUpdate);
   // int i = 0/0;
+
+  
   for (int i = 0; i < cmpsToUpdate.length; i++) {
     drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent);
   }
-  if (cmpsToUpdate.length > 0)
+  //drawComponent(&parentComponent, &parentComponent, &actionHints, &modeHints);
+  if (updatingHints == 1){
+    // int i = 0/0;
     emptyComponentTable(&cmpsToUpdate);
-  // int i = 0/0;
+  }
+  /*  
+    //Draw the hints components
+    char * actionHintString = malloc(sizeof(char) * 2000);
+    char * modeHintsString = malloc(sizeof(char) * 2000);
+    actionHintString[0] = '\0';
+    modeHintsString[0] = '\0';
+
+    //Build the final string
+    for (int i = 1; i < actionHints.length; i++){
+      if (i == 1){
+        sprintf(actionHintString, "%s", actionHints.table[i]);
+      }else{
+        sprintf(actionHintString, "%s  %s", actionHintString, actionHints.table[i]);
+      }
+    }
+    actionHintsComponent->text_properties.content = actionHintString;
+    debug("New Actions hint: %s", actionHintString);
+
+    //Build the final string
+    for (int i = 1; i < modeHints.length; i++){
+      if (i == 1){
+        sprintf(modeHintsString, "%s", modeHints.table[i]);
+      }else{
+        sprintf(modeHintsString, "%s  %s", modeHintsString, modeHints.table[i]);
+      }
+    }
+    modeHintsComponent->text_properties.content = modeHintsString;
+    debug("New Mode hint: %s", modeHintsString);
+
+    // Mark components as updated and redraw all
+    updateComponent(actionHintsComponent, 1);
+    updateComponent(modeHintsComponent, 1);
+
+    calculateComponentDimensions(&parentComponent, &parentComponent);
+    //calculateComponentDimensions(actionHintsComponent->parent, actionHintsComponent->parent->parent);
+    //calculateComponentDimensions(modeHintsComponent->parent, modeHintsComponent->parent->parent);
+
+    drawComponent(actionHintsComponent->parent, actionHintsComponent->parent->parent);
+    drawComponent(modeHintsComponent->parent, modeHintsComponent->parent->parent);
+
+
+    emptyComponentTable(&cmpsToUpdate);
+
+    free(actionHintString);
+    free(modeHintsString);
+  }*/
 }
+
+int calculateHintMessages(Component * component, StringTable * modeHint, StringTable * actionHint, int alreadyFound){
+  if (component == NULL){
+    //We are at root level
+    StringTable actionHints;
+    StringTable modeHints;
+    actionHints = newStringTable("");
+    modeHints = newStringTable("");
+    for(int i = 0; i < parentComponent.childCount; i++){
+      //TODO: Memory leak here, must free the memory whenever the tables are no longer used
+      calculateHintMessages(parentComponent.children[i], &modeHints, &actionHints, 0);
+    }
+
+    //Built the final string
+    char * actionHintString = malloc(sizeof(char) * 2000);
+    char * modeHintsString = malloc(sizeof(char) * 2000);
+    actionHintString[0] = '\0';
+    modeHintsString[0] = '\0';
+
+    //Build the final string
+    for (int i = 1; i < actionHints.length; i++){
+      if (i == 1){
+        sprintf(actionHintString, "%s", actionHints.table[i]);
+      }else{
+        sprintf(actionHintString, "%s  %s", actionHintString, actionHints.table[i]);
+      }
+    }
+    actionHintsComponent->text_properties.content = actionHintString;
+    debug("New Actions hint: %s", actionHintString);
+
+    //Build the final string
+    for (int i = 1; i < modeHints.length; i++){
+      if (i == 1){
+        sprintf(modeHintsString, "%s", modeHints.table[i]);
+      }else{
+        sprintf(modeHintsString, "%s  %s", modeHintsString, modeHints.table[i]);
+      }
+    }
+    modeHintsComponent->text_properties.content = modeHintsString;
+    debug("New Mode hint: %s", modeHintsString);
+
+    // Mark components as updated and redraw all
+    updateComponent(actionHintsComponent->parent, 1);
+    updateComponent(modeHintsComponent->parent, 1);
+    return 0;
+    
+  }else{
+    //We are not at root level
+    int alreadyFoundAux = alreadyFound;
+    int foundInChild;
+    if (component == focusComponent){
+      alreadyFoundAux = 1;
+    }
+    
+    //If already found, search on the selected child only
+    switch (component->component_type) {
+      case container_t:
+        for (int i = 0; i < component->childCount; i++) {
+          foundInChild = calculateHintMessages(component->children[i], modeHint, actionHint, alreadyFoundAux);
+          alreadyFoundAux = alreadyFoundAux == 1 ? 1 : foundInChild;
+        }
+        break;
+      case tabview_t: 
+        alreadyFoundAux = calculateHintMessages(component->children[component->tabview_properties.selectedTab], modeHint, actionHint, alreadyFoundAux);
+        break;
+      default:
+        break;
+    }
+
+    if (alreadyFoundAux == 1){
+      // Add string if already found 
+      if (component->modeHint != NULL) addStringToTable(component->modeHint, modeHint);
+      if (component->actionHint != NULL) addStringToTable(component->actionHint, actionHint);
+      return 1;
+    }
+    
+    return alreadyFoundAux;
+  }
+}
+
 
 /*******************************************************************/
 /********************* Component preCalculation ********************/
@@ -1800,8 +1961,10 @@ void calculateTextComponent(Component *component) {
     debug("Calculated Height: %d", calculatedHeight);
     debug("Calculated Width: %d", longestSentence);
   } else {
-    component->height = 1;
+    component->real_height = 1;
     component->real_width = strlen(component->text_properties.content)-1;
+    debug("Calculated Height: %d", component->real_height);
+    debug("Calculated Width: %d", component->real_width);
 
     //component->autoHeight = 0;
   }
@@ -1930,9 +2093,9 @@ void calculateComponentDimensionsHeight(Component *component,
   } else if (component->autoHeight == 1) {
     if (component->component_type == text_t){
       calculateTextComponent(component);
-        if (component->real_height < (min_y - min_y)){
-          max_y = min_y + component->real_height;
-        }
+      if (component->real_height < (min_y - min_y)){
+        max_y = min_y + component->real_height;
+      }
       //component->real_height = component->real_height > (parent->real_height - 2) ? parent->real_height-2 : component->real_height;
     }else{
       debug("Height dependant on childs");
@@ -2171,7 +2334,7 @@ void calculateComponentDimensionsWidth(Component *component,
         min_x = 0;
       }
       if (max_x == -1){
-        max_x = min_x + component->parent->real_width;
+        max_x = min_x + component->parent->real_width - componentMarginEnd;
       }
 
       component->real_width = max_x - min_x;
@@ -2287,6 +2450,8 @@ Component *newContainer() {
   cont->maxHeight = -1;
   cont->minHeight = -1;
   cont->onKeyPress = handleDefaultInput;
+  cont->actionHint = NULL;
+  cont->modeHint = NULL;
 
   return cont;
 }
