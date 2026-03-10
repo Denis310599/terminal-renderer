@@ -87,6 +87,11 @@ typedef struct TreeView {
   int highlightMode; // 0 highlight child context, 1 hightlight siblins context
 } TreeView;
 
+typedef struct ObjectManagerData{
+  int movementMode; // 0 none, 1 move, 2 rotate, 3 scale
+  float scaler;
+}ObjectManagerData;
+
 typedef struct Style {
   char **barckgroundColor;
   char **focusBackgroundColor;
@@ -228,6 +233,7 @@ TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
 TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
                                         int careAboutCollapsed);
 void loadNewObject(char * uri, int format);
+void createAxis();
 
 /*Custom function declaration(aka handlers)*/
 void handleObjectManajerKeyPress(Component *component, char keypress);
@@ -252,10 +258,13 @@ Component *focusComponent;
 ComponentTable cmpsToUpdate;
 Component *viewport;
 Component * objectTreeView = NULL;
-TreeViewElement * selectedTreeElem;
-Object * selectedObject;
+TreeViewElement * selectedTreeElem = NULL;
+Object * selectedObject = NULL;
 Component * actionHintsComponent;
 Component * modeHintsComponent;
+Component * commandHintComponent;
+ObjectManagerData * objectManagerData;
+Object * axisObjects[12];
 
 /*Handler deffinition*/
 void handleObjectManajerKeyPress(Component *component, char keypress) {
@@ -276,138 +285,7 @@ void handleObjectManajerKeyPress(Component *component, char keypress) {
     component->tabview_properties.snapTab = 1;
     updateThisCMP = 1;
     break;
-  case '+':
-    component->tabview_properties.offset++;
-    component->tabview_properties.snapTab = 0;
-    updateThisCMP = 1;
-    break;
-  case '-':
-    component->tabview_properties.offset == 0
-        ?: component->tabview_properties.offset--;
-    component->tabview_properties.snapTab = 0;
-    updateThisCMP = 1;
-    break;
-  case 'n':
-    //New object
-    loadNewObject("../assets/teapot.stl", 0);
-    break;
-  case (char) 255:
-    //Up
-  case (char) 254:
-    //Down
-  case (char) 253:
-    // Right
-  case (char) 252:
-    // Left
-    //Grab the object to update
-    debug("Handling arrow press in ObjectManager: %d", keypress);
-    selectedCmp = component->children[component->tabview_properties.selectedTab]->children[0];
-    debug("Current selected tab cmp: %d", selectedCmp); 
 
-    // selectedElement->data = void *
-    selectedTreeElem = selectedCmp->treeview_properties.selectedElement;
-    debug("Current selected tree element: %d", selectedTreeElem); 
-    selectedObject = (Object *) selectedTreeElem->data;
-    debug("Moving selected object: %d", selectedObject);
-    //Object * selectedObject = selectedCmp->treeview_properties.selectedElement.data;
-    switch (keypress){
-      case (char) 255: selectedObject->pos.y -= 1; break;
-      case (char) 254: selectedObject->pos.y += 1; break;
-      case (char) 253: selectedObject->pos.x += 1; break;
-      case (char) 252: selectedObject->pos.x -= 1; break;
-      default: ;
-    }
-    break;
-  case 'w':
-  case 'a':
-  case 's':
-  case 'd':
-  case 'A':
-  case 'D':
-    //Grab the object to update
-    debug("Handling arrow press in ObjectManager: %d", keypress);
-    selectedCmp = component->children[component->tabview_properties.selectedTab]->children[0];
-    debug("Current selected tab cmp: %d", selectedCmp); 
-
-    // selectedElement->data = void *
-    selectedTreeElem = selectedCmp->treeview_properties.selectedElement;
-    debug("Current selected tree element: %d", selectedTreeElem); 
-    selectedObject = (Object *) selectedTreeElem->data;
-    debug("Scaling selected object: %d", selectedObject);
-    //Object * selectedObject = selectedCmp->treeview_properties.selectedElement.data;
-    //
-    //Calculate the current rotation matrix oldRot
-    mat4 rotationMatrix;
-    glm_euler_xyz((vec3){deg2rad(selectedObject->rot.x),
-                    deg2rad(selectedObject->rot.y),
-                    deg2rad(selectedObject->rot.z)},
-                    rotationMatrix);
-    vec3 axis;
-    float angle = 10.0f;
-    //Get the axis to spin around
-    switch (keypress){
-      case 'w': 
-        axis[0] = 1;
-        axis[1] = 0;
-        axis[2] = 0;
-        break;
-      case 's': 
-        axis[0] = 1;
-        axis[1] = 0;
-        axis[2] = 0;
-        angle *= -1.0f;
-        break;
-      case 'a': 
-        axis[0] = 0;
-        axis[1] = 1;
-        axis[2] = 0;
-        angle *= -1.0f;
-        break;
-      case 'd': 
-        axis[0] = 0;
-        axis[1] = 1;
-        axis[2] = 0;
-        break;
-      case 'A': 
-        axis[0] = 0;
-        axis[1] = 0;
-        axis[2] = 1;
-        angle *= -1.0f;
-        break;
-      case 'D': 
-        axis[0] = 0;
-        axis[1] = 0;
-        axis[2] = 1;
-        break;
-      default: ;
-    }
-
-    //Make the rotation along the specified axis;
-
-    //Calculate the delta rotation matrix newRot
-    mat4 deltaRotation;
-    glm_rotate_make(deltaRotation, deg2rad(angle), axis);
-
-
-    //Calculate the new rotation matrix newRot*newRot
-    mat4 finalRotation;
-    glm_mat4_mul(rotationMatrix, deltaRotation, finalRotation);
-
-    vec3 finalAngles;
-    glm_euler_angles(finalRotation, finalAngles);
-    selectedObject->rot.x = rad2deg(finalAngles[0]);
-    selectedObject->rot.y = rad2deg(finalAngles[1]);
-    selectedObject->rot.z = rad2deg(finalAngles[2]);
-
-    /*printf(" %.2fx, %.2fy, %.2fz        \n", selectedObject->rot.x, 
-        selectedObject->rot.y,
-      selectedObject->rot.z);
-    printf(" %.2fx, %.2fy, %.2fz       \n", axis[0], 
-        axis[1],
-        axis[2]);*/
-    break;
-
-    
   default:
     // Pass to the component controller
     if (component->tabview_properties.selectedTab < component->childCount &&
@@ -434,95 +312,258 @@ void handleObjectManajerKeyPress(Component *component, char keypress) {
 /*Function that handles the tree view of the object manager*/
 void handleTreeViewInput(Component *component, char keypress) {
   debug("Handling keypress in TreeView");
-	int redrawWholeComponent = 0;
+  int updateThisCMP = 0;
+  int redrawWholeComponent = 0;
   // For moving, if hightLight mode 0: regular up and down
   // if highLight mode 1: Jump across brothers and auto jump to parents and
   // uncles
   switch (keypress) {
-  case 'k':
-    if (component->treeview_properties.highlightMode == 0) {
-      // Previous showed element (not inside collapsed)
-      component->treeview_properties.selectedElement =
-          getPrevTreeViewElement(component->treeview_properties.selectedElement,
-                                 1) != NULL
-              ? getPrevTreeViewElement(
-                    component->treeview_properties.selectedElement, 1)
-              : component->treeview_properties.selectedElement;
-    } else {
-      // Previous sibling
-      TreeViewElement *possibleNextElement = getPrevTreeViewElement(
-          component->treeview_properties.selectedElement, 2);
-      debug("Next Element: %d", possibleNextElement);
-      if (possibleNextElement != NULL &&
-          possibleNextElement->parentElement ==
-              component->treeview_properties.selectedElement->parentElement)
-        component->treeview_properties.selectedElement = possibleNextElement;
-    }
-    break;
-  case 'j':
-    if (component->treeview_properties.highlightMode == 0) {
-      // Next showed element (not inside collapsed)
-      component->treeview_properties.selectedElement =
-          getNextTreeViewElement(
-              component->treeview_properties.selectedElement,
-              component->treeview_properties.selectedElement->collapsed) != NULL
-              ? getNextTreeViewElement(
-                    component->treeview_properties.selectedElement,
-                    component->treeview_properties.selectedElement->collapsed)
-              : component->treeview_properties.selectedElement;
-    } else {
-      // Next sibling
-      TreeViewElement *possibleNextelement = getNextTreeViewElement(
-          component->treeview_properties.selectedElement, 1);
-      debug("Next Element: %d", possibleNextelement);
-      if (possibleNextelement != NULL &&
-          possibleNextelement->parentElement ==
-              component->treeview_properties.selectedElement->parentElement)
-        component->treeview_properties.selectedElement = possibleNextelement;
-    }
-    break;
-  case 'l':
-    if (component->treeview_properties.highlightMode == 1) {
-      // Set inside
-      if (component->treeview_properties.selectedElement->childElement !=
-          NULL) {
-				if(component->treeview_properties.selectedElement->collapsed == 1) redrawWholeComponent = 1;
-        component->treeview_properties.selectedElement->collapsed = 0;
+    case 'k':
+      updateThisCMP = 1;
+      if (component->treeview_properties.highlightMode == 0) {
+        // Previous showed element (not inside collapsed)
         component->treeview_properties.selectedElement =
-            component->treeview_properties.selectedElement->childElement;
+            getPrevTreeViewElement(component->treeview_properties.selectedElement,
+                                   1) != NULL
+                ? getPrevTreeViewElement(
+                      component->treeview_properties.selectedElement, 1)
+                : component->treeview_properties.selectedElement;
+      } else {
+        // Previous sibling
+        TreeViewElement *possibleNextElement = getPrevTreeViewElement(
+            component->treeview_properties.selectedElement, 2);
+        if (possibleNextElement != NULL &&
+            possibleNextElement->parentElement ==
+                component->treeview_properties.selectedElement->parentElement)
+          component->treeview_properties.selectedElement = possibleNextElement;
       }
-    }
-    break;
-  case 'h':
-    if (component->treeview_properties.highlightMode == 1) {
-      // Set outsied
-      if (component->treeview_properties.selectedElement->parentElement !=
-          NULL) {
+      break;
+    case 'j':
+      updateThisCMP = 1;
+      if (component->treeview_properties.highlightMode == 0) {
+        // Next showed element (not inside collapsed)
+        TreeViewElement * auxElement = getNextTreeViewElement(
+                component->treeview_properties.selectedElement,
+                component->treeview_properties.selectedElement->collapsed);
+
         component->treeview_properties.selectedElement =
-            component->treeview_properties.selectedElement->parentElement;
+                auxElement != NULL
+                ? auxElement
+                : component->treeview_properties.selectedElement;
+      } else {
+        // Next sibling
+        TreeViewElement *possibleNextelement = getNextTreeViewElement(
+            component->treeview_properties.selectedElement, 1);
+        if (possibleNextelement != NULL &&
+            possibleNextelement->parentElement ==
+                component->treeview_properties.selectedElement->parentElement)
+          component->treeview_properties.selectedElement = possibleNextelement;
       }
-    }
-    break;
-  case 'o':
-    if (component->treeview_properties.selectedElement->childElement != NULL) {
-			redrawWholeComponent = 1;
-      component->treeview_properties.selectedElement->collapsed =
-          !component->treeview_properties.selectedElement->collapsed;
-    }
+      break;
+    case 'l':
+      updateThisCMP = 1;
+      if (component->treeview_properties.highlightMode == 1) {
+        // Set inside
+        if (component->treeview_properties.selectedElement->childElement !=
+            NULL) {
+                                  if(component->treeview_properties.selectedElement->collapsed == 1) redrawWholeComponent = 1;
+          component->treeview_properties.selectedElement->collapsed = 0;
+          component->treeview_properties.selectedElement =
+              component->treeview_properties.selectedElement->childElement;
+        }
+      }
+      break;
+    case 'h':
+      updateThisCMP = 1;
+      if (component->treeview_properties.highlightMode == 1) {
+        // Set outsied
+        if (component->treeview_properties.selectedElement->parentElement !=
+            NULL) {
+          component->treeview_properties.selectedElement =
+              component->treeview_properties.selectedElement->parentElement;
+        }
+      }
+      break;
+    case 'o':
+      updateThisCMP = 1;
+      if (component->treeview_properties.selectedElement->childElement != NULL) {
+        redrawWholeComponent = 1;
+        component->treeview_properties.selectedElement->collapsed =
+            !component->treeview_properties.selectedElement->collapsed;
+      }
   }
-  debug("New selected element: %s",
-        component->treeview_properties.selectedElement->texts.table[2]);
+  //debug("New selected element: %s", component->treeview_properties.selectedElement->texts.table[2]);
+  if (updateThisCMP) debug("New selected element: %d", component->treeview_properties.selectedElement);
   if(redrawWholeComponent){
-		//Mark all elements as updated
-		updateComponent(component->parent, 0);
-		TreeViewElement * current = component->treeview_properties.child;
-		while(current != NULL){
-			//current->isUpdated = 1;
-			current = getNextTreeViewElement(current, current->collapsed);
-		}
-	}else{
-		updateComponent(component, 0);
-	}
+    //Mark all elements as updated
+    updateComponent(component->parent, 1);
+    TreeViewElement * current = component->treeview_properties.child;
+    while(current != NULL){
+      //current->isUpdated = 1;
+      current = getNextTreeViewElement(current, current->collapsed);
+    }
+  }else{
+    debug("Updating treeView component %d", component);
+    updateComponent(component->parent, 0);
+  }
+
+
+  Component * selectedCmp;
+  float scaler = objectManagerData->scaler;
+  switch (keypress) {
+    case 'r':
+      objectManagerData->movementMode = 2;
+      break;
+    case 't':
+      objectManagerData->movementMode = 1;
+      break;
+    case 'q':
+      objectManagerData->movementMode = 3;
+      break;
+    case '+':
+      objectManagerData->scaler *= 10;
+      break;
+    case '-':
+      objectManagerData->scaler *= 0.1;
+      break;
+    case 'n':
+      //New object
+      loadNewObject("../assets/teapot.stl", 0);
+      break;
+    case 'w':
+    case 'a':
+    case 's':
+    case 'd':
+    case 'A':
+    case 'D':
+      // Left
+      //Grab the object to update
+      debug("Handling arrow press in ObjectManager: %d", keypress);
+      selectedCmp = component;
+      debug("Current selected tab cmp: %d", selectedCmp); 
+
+      // selectedElement->data = void *
+      selectedTreeElem = selectedCmp->treeview_properties.selectedElement;
+      debug("Current selected tree element: %d", selectedTreeElem); 
+      selectedObject = (Object *) selectedTreeElem->data;
+      debug("Moving selected object: %d", selectedObject);
+      //Object * selectedObject = selectedCmp->treeview_properties.selectedElement.data;
+      switch (objectManagerData->movementMode) {
+        case (1):
+          // Move
+          switch (keypress){
+            case 'w': selectedObject->pos.x -= scaler; break;
+            case 's': selectedObject->pos.x += scaler; break;
+            case 'a': selectedObject->pos.y += scaler; break;
+            case 'd': selectedObject->pos.y -= scaler; break;
+            case 'A': selectedObject->pos.z += scaler; break;
+            case 'D': selectedObject->pos.z -= scaler; break;
+            default: ;
+          }
+          break;
+        case (3):
+          // Move
+          switch (keypress){
+            case 'w': selectedObject->scale.x -= scaler; break;
+            case 's': selectedObject->scale.x += scaler; break;
+            case 'a': selectedObject->scale.y += scaler; break;
+            case 'd': selectedObject->scale.y -= scaler; break;
+            case 'A': selectedObject->scale.z += scaler; break;
+            case 'D': selectedObject->scale.z -= scaler; break;
+            default: ;
+          }
+          break;
+        case (2):
+          //Rotating
+          //Calculate the current rotation matrix oldRot
+          mat4 rotationMatrix;
+          glm_euler_xyz((vec3){deg2rad(selectedObject->rot.x),
+                          deg2rad(selectedObject->rot.y),
+                          deg2rad(selectedObject->rot.z)},
+                          rotationMatrix);
+          vec3 axis;
+          float angle = 10.0f * scaler;
+          //Get the axis to spin around
+          switch (keypress){
+            case 'w': 
+              axis[0] = 1;
+              axis[1] = 0;
+              axis[2] = 0;
+              break;
+            case 's': 
+              axis[0] = 1;
+              axis[1] = 0;
+              axis[2] = 0;
+              angle *= -1.0f;
+              break;
+            case 'a': 
+              axis[0] = 0;
+              axis[1] = 1;
+              axis[2] = 0;
+              angle *= -1.0f;
+              break;
+            case 'd': 
+              axis[0] = 0;
+              axis[1] = 1;
+              axis[2] = 0;
+              break;
+            case 'A': 
+              axis[0] = 0;
+              axis[1] = 0;
+              axis[2] = 1;
+              angle *= -1.0f;
+              break;
+            case 'D': 
+              axis[0] = 0;
+              axis[1] = 0;
+              axis[2] = 1;
+              break;
+            default: ;
+          }
+          //Make the rotation along the specified axis;
+          //Calculate the delta rotation matrix newRot
+          mat4 deltaRotation;
+          glm_rotate_make(deltaRotation, deg2rad(angle), axis);
+
+
+          //Calculate the new rotation matrix newRot*newRot
+          mat4 finalRotation;
+          glm_mat4_mul(rotationMatrix, deltaRotation, finalRotation);
+
+          vec3 finalAngles;
+          glm_euler_angles(finalRotation, finalAngles);
+          selectedObject->rot.x = rad2deg(finalAngles[0]);
+          selectedObject->rot.y = rad2deg(finalAngles[1]);
+          selectedObject->rot.z = rad2deg(finalAngles[2]);
+          break;
+      }
+      break;
+  
+  }
+  
+  selectedTreeElem = component->treeview_properties.selectedElement;
+  if (selectedTreeElem != NULL){
+    selectedObject = (Object *) selectedTreeElem->data;
+  }
+
+  char * commandHint = malloc(sizeof(char) * 100);
+  switch (objectManagerData->movementMode){
+    case (1):
+      sprintf(commandHint, "Translating...");
+      break;
+    case (2):
+      sprintf(commandHint, "Rotating...");
+      break;
+    case (3):
+      sprintf(commandHint, "Scaling...");
+      break;
+  }
+  sprintf(commandHint, "%s - x%.2f", commandHint, objectManagerData->scaler);
+  commandHintComponent->text_properties.content = commandHint;
+
+  // component->isUpdated = 1;
+  if (updateThisCMP) updateComponent(component, 0);
+  //updateComponent(objectTreeView, 0);
 }
 
 /*Function that handles the default operation of a cmp. It passes the onclick to
@@ -544,6 +585,8 @@ void loadNewObject(char * uri, int format){
   Object * createdObject;
   if(format == 0){
     createdObject = importStl(uri, (Vector3d){1, 1, 1}, (Vector3d){0, 0, 0});
+    createdObject->visible = 1;
+    createdObject->overlay = 0;
   }
 
 
@@ -560,10 +603,12 @@ void loadNewObject(char * uri, int format){
   }else{
     //First item has new previous
     objectTreeView->treeview_properties.child->prevElement = treeViewElem;
-    objectTreeView->treeview_properties.child->status = 0;
-    objectTreeView->treeview_properties.child->parentElement = NULL;
+    //objectTreeView->treeview_properties.child->status = 0;
+    treeViewElem->parentElement = objectTreeView->treeview_properties.child->parentElement;
+    //objectTreeView->treeview_properties.child->parentElement = NULL;
     //New inserted item has the previous first as next
     treeViewElem->nextElement = objectTreeView->treeview_properties.child;
+    
     //The new object base child has changed
     objectTreeView->treeview_properties.child = treeViewElem;
   }
@@ -590,10 +635,9 @@ int main() {
   // Define the camera
   //loadNewObject("../assets/eevee2.stl", 0);
   //(Vector3d){-130, 214, 0});
-  //importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3},
-  //         (Vector3d){0, 0, 0});
-  //importStl("../assets/teapot.stl", (Vector3d){0.3, 0.3, 0.3},
-    //        (Vector3d){0, 10, 0});
+           //(Vector3d){0, 0, 0});
+  //object->material->lighting = 0;
+
 
   printf("\033[2J");
   while (1) {
@@ -646,6 +690,8 @@ void initUI() {
   parentComponent.children = malloc(6 * sizeof(Component *));
   parentComponent.children[0] = child;
 
+
+
   Component * text = newTextComponent("Actions");
   actionHintsComponent = text;
   actionHintsComponent->parent = child;
@@ -674,6 +720,19 @@ void initUI() {
   child->border = 0;
 
   parentComponent.children[1] = child;
+
+  Component * text3 = newTextComponent("");
+  commandHintComponent = text3;
+  text3->parent = child;
+  text3->topToTopOf = child;
+  //text->bottomToBottomOf = child;
+  //text->endToEndOf = child;
+  text3->startToStartOf = child;
+  text3->text_properties.bgColor = BG_2_COLOR;
+  child->childCount = 1;
+  child->children = malloc(sizeof(Component*));
+  child->children[0] = text3;
+
 
   /*Top Menu container*/
   child = newContainer();
@@ -764,7 +823,7 @@ void initUI() {
   Camera myCam;
   // myCam.pos = (Vector3d){15, 0, 8};
   // myCam.pos = (Vector3d){70, 0, 50};
-  myCam.pos = (Vector3d){0, 50, 50};
+  myCam.pos = (Vector3d){50, 50, 50};
   myCam.dir = (Vector3d){0, 0, 1};
   myCam.fov = 45;
   myCam.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, myCam.pos, -1));
@@ -823,9 +882,14 @@ void initUI() {
   treeView->parent = tabView->children[0];
   treeView->onKeyPress = handleTreeViewInput;
   treeView->treeview_properties.highlightMode = 1;
-  treeView->actionHint = "hjkl) Navitate tree view";
+  treeView->actionHint = "hjkl) Navitate tree view   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis";
   treeView->modeHint = "t) Translate  r) Rotate  q) Scale";
   objectTreeView = treeView;
+  objectManagerData = malloc(sizeof(ObjectManagerData));
+  objectManagerData->movementMode = 1;
+  objectManagerData->scaler = 1.0f;
+
+
 
   /*
   TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
@@ -898,6 +962,71 @@ void initUI() {
 
   // updateComponent(&parentComponent, 1);
   addComponentToTable(&parentComponent, &cmpsToUpdate);
+
+  createAxis();
+}
+
+void createAxis(){
+  Object * object;
+  object = importStl("../assets/AxisArrow.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->material->color = (Vector3d){0, 0, 1};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[0] = object;
+
+  object = importStl("../assets/AxisArrow.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->rot.x = 90;
+  object->material->color = (Vector3d){0, 1, 0};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[1] = object;
+
+  object = importStl("../assets/AxisArrow.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->rot.y = 90;
+  object->material->color = (Vector3d){1, 0, 0};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[2] = object;
+}
+
+void updateAxis(){
+  if (selectedObject == NULL){
+    axisObjects[0]->visible = 0;
+    axisObjects[1]->visible = 0;
+    axisObjects[2]->visible = 0;
+    return;
+  }
+  axisObjects[0]->visible = 1;
+  axisObjects[1]->visible = 1;
+  axisObjects[2]->visible = 1;
+  //Calculate scale based on distance to the object
+  Camera activeCamera = viewport->viewport_properties.vp_settings->render_settings->active_camera;
+  float axisScale = moduloVector(vect_sum(selectedObject->pos, activeCamera.pos, -1.0f)) * tan(deg2rad(activeCamera.fov)) * 0.01 * 0.5 * 0.25;
+  //activeCamera.pos = selectedObject->pos;
+
+  axisObjects[0]->pos = selectedObject->pos;
+  axisObjects[0]->scale.x = axisScale;
+  axisObjects[0]->scale.y = axisScale;
+  axisObjects[0]->scale.z = axisScale;
+
+  axisObjects[1]->pos = selectedObject->pos;
+  axisObjects[1]->scale.x = axisScale;
+  axisObjects[1]->scale.y = axisScale;
+  axisObjects[1]->scale.z = axisScale;
+
+  axisObjects[2]->pos = selectedObject->pos;
+  axisObjects[2]->scale.x = axisScale;
+  axisObjects[2]->scale.y = axisScale;
+  axisObjects[2]->scale.z = axisScale;
+  
+
+
 }
 
 void prepareTerminal() {
@@ -1005,7 +1134,7 @@ int handleInput() {
   if (read(STDIN_FILENO, &ch, 1) > 0) {
     debug("Char presser: %c", ch);
     switch (ch) {
-      case 'q': 
+      case 'Q': 
         // Process closing
         closeProgram();
         return 1;
@@ -1585,6 +1714,7 @@ void drawTreeView(Component *component) {
         }
 
         // Text color
+        debug("Drawing tree element %d with status %d", current, current->status);
         switch (current->status) {
         case 0:
           // Idle status
@@ -1683,6 +1813,7 @@ void drawTreeView(Component *component) {
 }
 
 void drawUI() {
+  updateAxis();
   int updatingHints = 0;
 
   if (cmpsToUpdate.length > 0){
@@ -1701,7 +1832,7 @@ void drawUI() {
 
   //addComponentToTable(&parentComponent, &cmpsToUpdate);
   // Add viewport to render
-  //addComponentToTable(viewport, &cmpsToUpdate);
+  addComponentToTable(viewport, &cmpsToUpdate);
   // int i = 0/0;
 
   
@@ -1804,6 +1935,7 @@ int calculateHintMessages(Component * component, StringTable * modeHint, StringT
     // Mark components as updated and redraw all
     updateComponent(actionHintsComponent->parent, 1);
     updateComponent(modeHintsComponent->parent, 1);
+    updateComponent(commandHintComponent->parent, 1);
     return 0;
     
   }else{
@@ -1867,7 +1999,10 @@ void preCalculateTreeViewComponent(Component *component) {
   // Change status to idle if not selected but status is selected
   TreeViewElement *current = component->treeview_properties.child;
   /*Iterates over every tree element, checking for its status*/
+  int stat;
+  debug("Tree elem %d", current);
   while (current != NULL) {
+    stat = current->status;
     if (current->status == 2 &&
         current != component->treeview_properties.selectedElement) {
       current->status = 0;
@@ -1877,6 +2012,7 @@ void preCalculateTreeViewComponent(Component *component) {
       current->status = 2;
       //current->isUpdated = 1;
     }
+    debug("Tree elem %d %d->%d", current, stat, current->status);
     current = getNextTreeViewElement(current, 0);
   }
 }
@@ -2610,11 +2746,13 @@ void addStringToTable(char *string, StringTable *table) {
 /*Function that return next treeViewElement in order, not caring about height*/
 TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
                                         int collapsed) {
-  debug("Getting next TreeViewElement of %s", element->texts.table[2]);
+  debug("Getting next TreeViewElement of %d", element);
   if (!collapsed && element->childElement != NULL)
     return element->childElement;
-  else if (element->nextElement != NULL)
+  else if (element->nextElement != NULL){
+    debug("Next element: %d", element->nextElement);
     return element->nextElement;
+  }
   else if (element->parentElement != NULL &&
            element->parentElement->nextElement != NULL)
     return element->parentElement->nextElement;
@@ -2628,7 +2766,7 @@ TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
  * collapsed*/
 TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
                                         int careAboutCollapsed) {
-  debug("Getting next TreeViewElement of %s", element->texts.table[2]);
+  debug("Getting prev TreeViewElement of %d", element);
   if (element->prevElement != NULL) {
     if (careAboutCollapsed == 2 ||
         (careAboutCollapsed == 1 && element->prevElement->collapsed))
@@ -2643,9 +2781,12 @@ TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
       if (current == element)
         break;
     }
+    debug("Prev element: %d", element->nextElement);
     return prev;
-  } else if (element->parentElement != NULL)
+  } else if (element->parentElement != NULL){
+    debug("Parent element: %d", element->nextElement);
     return element->parentElement;
+  }
   else
     return NULL;
 }

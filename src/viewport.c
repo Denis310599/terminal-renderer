@@ -206,6 +206,11 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 	Vector3d point[4];
 	Object meshObject;
 	meshObject.tipo = Malla;
+	meshObject.material = malloc(sizeof(Material));
+	meshObject.material->color = (Vector3d) {rand()/(float) RAND_MAX,
+						rand()/(float) RAND_MAX,
+						rand()/(float) RAND_MAX};
+	meshObject.material->lighting = 1;
 	Vector3d meanPosition = {0, 0, 0};
 	Vector3d meanPoint;
 	int leido = 0;

@@ -71,7 +71,7 @@ void debug(char *  msg, ...){
 		//printf("\n");
 		if(debug_lock == 1){
 			debug_lock = 0;
-			debugFile = fopen("/dev/pts/2", "w");
+			debugFile = fopen("./debug.out", "w");
 		}
 		va_start(argPtr, msg);
 		fprintf(debugFile, "[BEBUG]");
@@ -347,7 +347,7 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 	glm_vec3_cross(cameraDir, cameraRight, cameraUp);
 	glm_normalize(cameraUp);
 
-	glm_perspective(glm_rad(currentActiveCam.fov), (float) (viewport_settings->render_settings->screen_width)/ (float) (viewport_settings->render_settings->screen_height), 1.0f, 100.0f, projection);
+	glm_perspective(glm_rad(currentActiveCam.fov), (float) (viewport_settings->render_settings->screen_width)/ (float) (viewport_settings->render_settings->screen_height), 1.0f, 10000.0f, projection);
 	glm_look((vec3) { currentActiveCam.pos.x, currentActiveCam.pos.y, currentActiveCam.pos.z}, cameraDir, cameraUp, view);
 	//glm_look((vec3) {0.0f, 0.0f, 0.0f}, cameraDir, cameraUp, view);
 	//glm_lookat((vec3) {ACTIVE_CAMERA.pos.x, 0.0f, ACTIVE_CAMERA.pos.y}, (vec3) {0.0f, 0.0f, 0.0f}, (vec3) {0.0f, 1.0f, 0.0f}, view);
@@ -358,14 +358,18 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 	unsigned int lightColorLoc = glGetUniformLocation(viewport_settings->render_settings->shader_program, "lightColor");
 	unsigned int lightPosLoc = glGetUniformLocation(viewport_settings->render_settings->shader_program, "lightPos");
 	unsigned int objectColorLoc = glGetUniformLocation(viewport_settings->render_settings->shader_program, "objectColor");
+	unsigned int lightingLoc = glGetUniformLocation(viewport_settings->render_settings->shader_program, "lighting");
 	glUniformMatrix4fv(viewLoc, 1, GL_FALSE, (float *)view);
 	glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, (float *)projection);
 	vec3 lightColor = {1.0f, 1.0f, 1.0f};
 	vec3 lightPos = {5.0f, 5.0f, 5.0f};
-	vec3 objectColor= {1.0f, 1.0f, 1.0f};
+	vec3 objectColor= {1.0f, 0.5f, 0.3f};
 	glUniform3f(lightColorLoc, 1.0f, 1.0f, 1.0f);
 	glUniform3f(lightPosLoc,currentActiveCam.pos.x, currentActiveCam.pos.y, currentActiveCam.pos.z);//8.0f, 8.0f, 2.0f);
-	glUniform3f(objectColorLoc, 1.0f, 0.5f, 0.3f);
+	
+
+
+
 
 
 	unsigned int modelLoc= glGetUniformLocation(viewport_settings->render_settings->shader_program, "model");
@@ -375,7 +379,33 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 	//For every object we draw it
 	ObjectListNode * current = listaObjetos;
 	while(current != NULL){
+		if (current->object.visible == 0) {
+			current = current->next;
+			continue;
+		}
+
+		if (current->object.overlay == 1){
+			glDisable(GL_DEPTH_TEST);
+		}else{
+			glEnable(GL_DEPTH_TEST);
+		}
+
+		glUniform1i(lightingLoc, current->object.material->lighting);
 		if(current->object.tipo == Malla){	
+			if (current->object.material != NULL){
+				glUniform3f(objectColorLoc,
+					current->object.material->color.x,
+					current->object.material->color.y,
+					current->object.material->color.z
+					);
+			}else{
+				glUniform3f(objectColorLoc,
+					objectColor[0],
+					objectColor[1],
+					objectColor[2]
+					);
+			}
+
 			glm_mat4_identity(modelMatrix);
 			//Translate
 			glm_translate(modelMatrix, 
