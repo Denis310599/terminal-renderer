@@ -29,10 +29,10 @@ int FRAME_BUFFER_INDEX = 0;
 
 char * payload; 
 size_t output_length;
-float fps;
+int fps = 0;
 float delta_time;
-float time_old;
-float time_new;
+float time_old = 0;
+float time_new = 0;
 
 /*Function that creates a new viewport object*/
 void vp_create_viewport(ViewportSettings * viewportSettings){
@@ -124,11 +124,14 @@ void vp_render_viewport(ViewportSettings * viewportSettings){
 
 	time_new = clock();
 	delta_time =  ((double)(time_new-time_old))/CLOCKS_PER_SEC;
-	fps = (double) 1.0/ delta_time;
-	time_old = time_new;
-	printf("%s",moveCursor);
-	fflush(stdout);
-	printf("FPS %2f", fps);
+	fps += 1;
+	if(delta_time > 1.0f){
+		time_old = time_new;
+		printf("%s",moveCursor);
+		fflush(stdout);
+		printf("FPS %d", fps);
+		fps = 0;
+	}
 }
 
 
@@ -207,9 +210,9 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 	Object meshObject;
 	meshObject.tipo = Malla;
 	meshObject.material = malloc(sizeof(Material));
-	meshObject.material->color = (Vector3d) {rand()/(float) RAND_MAX,
-						rand()/(float) RAND_MAX,
-						rand()/(float) RAND_MAX};
+	meshObject.material->color = (Vector3d) {0.8* rand()/(float) RAND_MAX,
+						0.8*rand()/(float) RAND_MAX,
+						0.8*rand()/(float) RAND_MAX};
 	meshObject.material->lighting = 1;
 	Vector3d meanPosition = {0, 0, 0};
 	Vector3d meanPoint;

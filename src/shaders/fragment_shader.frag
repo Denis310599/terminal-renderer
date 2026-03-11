@@ -1,4 +1,5 @@
 #version 330 core
+const float PI = 3.1415926538;
 out vec4 FragColor;
 
 in vec3 Normal;
@@ -28,6 +29,13 @@ void main()
         result = (diffuse + ambient) * objectColor;
     }else{
         result = objectColor;
+        vec3 norm = normalize(Normal);
+        vec3 lightDir = normalize(lightPos - FragPos);
+        float dot_prod = dot(norm, lightDir);
+        float angle = acos(dot_prod);
+        if (angle > (PI/2.0)){
+           discard;
+        }
     }
     FragColor = vec4(result, 1.0);
 }

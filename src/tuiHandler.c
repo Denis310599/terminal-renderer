@@ -90,6 +90,7 @@ typedef struct TreeView {
 typedef struct ObjectManagerData{
   int movementMode; // 0 none, 1 move, 2 rotate, 3 scale
   float scaler;
+  int global; // 0 False, 1 True
 }ObjectManagerData;
 
 typedef struct Style {
@@ -233,6 +234,7 @@ TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
 TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
                                         int careAboutCollapsed);
 void loadNewObject(char * uri, int format);
+void rotateObject(Object * object, vec3 axis, float angle);
 void createAxis();
 
 /*Custom function declaration(aka handlers)*/
@@ -426,6 +428,9 @@ void handleTreeViewInput(Component *component, char keypress) {
     case '-':
       objectManagerData->scaler *= 0.1;
       break;
+    case 'g':
+      objectManagerData->global = !objectManagerData->global;
+      break;
     case 'n':
       //New object
       loadNewObject("../assets/teapot.stl", 0);
@@ -451,14 +456,53 @@ void handleTreeViewInput(Component *component, char keypress) {
       switch (objectManagerData->movementMode) {
         case (1):
           // Move
-          switch (keypress){
-            case 'w': selectedObject->pos.x -= scaler; break;
-            case 's': selectedObject->pos.x += scaler; break;
-            case 'a': selectedObject->pos.y += scaler; break;
-            case 'd': selectedObject->pos.y -= scaler; break;
-            case 'A': selectedObject->pos.z += scaler; break;
-            case 'D': selectedObject->pos.z -= scaler; break;
-            default: ;
+          if (objectManagerData->global){
+            switch (keypress){
+              case 'w': selectedObject->pos.x += scaler; break;
+              case 's': selectedObject->pos.x -= scaler; break;
+              case 'a': selectedObject->pos.y -= scaler; break;
+              case 'd': selectedObject->pos.y += scaler; break;
+              case 'A': selectedObject->pos.z -= scaler; break;
+              case 'D': selectedObject->pos.z += scaler; break;
+              default: ;
+            }
+          }else{
+            mat4 rotationMatrix;
+            glm_euler_xyz((vec3){deg2rad(selectedObject->rot.x),
+                            deg2rad(selectedObject->rot.y),
+                            deg2rad(selectedObject->rot.z)},
+                            rotationMatrix);
+            Vector3d axis;
+            switch (keypress){
+              case 'w':
+              case 's': 
+                axis.x = rotationMatrix[0][0];
+                axis.y = rotationMatrix[0][1];
+                axis.z = rotationMatrix[0][2];
+                break;
+              case 'a':
+              case 'd': 
+                axis.x = rotationMatrix[1][0];
+                axis.y = rotationMatrix[1][1];
+                axis.z = rotationMatrix[1][2];
+                break;
+              case 'A':
+              case 'D': 
+                axis.x = rotationMatrix[2][0];
+                axis.y = rotationMatrix[2][1];
+                axis.z = rotationMatrix[2][2];
+                break;
+              default: ;
+            }
+            axis = normalizeVector(axis);
+            float factor = scaler;
+            if (keypress == 'a'  || keypress == 'A' || keypress == 's'){
+              factor = -scaler;
+            }
+            selectedObject->pos.x += factor * axis.x;
+            selectedObject->pos.y += factor * axis.y;
+            selectedObject->pos.z += factor * axis.z;
+
           }
           break;
         case (3):
@@ -476,11 +520,6 @@ void handleTreeViewInput(Component *component, char keypress) {
         case (2):
           //Rotating
           //Calculate the current rotation matrix oldRot
-          mat4 rotationMatrix;
-          glm_euler_xyz((vec3){deg2rad(selectedObject->rot.x),
-                          deg2rad(selectedObject->rot.y),
-                          deg2rad(selectedObject->rot.z)},
-                          rotationMatrix);
           vec3 axis;
           float angle = 10.0f * scaler;
           //Get the axis to spin around
@@ -520,21 +559,7 @@ void handleTreeViewInput(Component *component, char keypress) {
               break;
             default: ;
           }
-          //Make the rotation along the specified axis;
-          //Calculate the delta rotation matrix newRot
-          mat4 deltaRotation;
-          glm_rotate_make(deltaRotation, deg2rad(angle), axis);
-
-
-          //Calculate the new rotation matrix newRot*newRot
-          mat4 finalRotation;
-          glm_mat4_mul(rotationMatrix, deltaRotation, finalRotation);
-
-          vec3 finalAngles;
-          glm_euler_angles(finalRotation, finalAngles);
-          selectedObject->rot.x = rad2deg(finalAngles[0]);
-          selectedObject->rot.y = rad2deg(finalAngles[1]);
-          selectedObject->rot.z = rad2deg(finalAngles[2]);
+          rotateObject(selectedObject, axis, angle);
           break;
       }
       break;
@@ -619,6 +644,31 @@ void loadNewObject(char * uri, int format){
 
   //Udate the tree view to add this new item
   updateComponent(objectTreeView, 0);
+}
+
+void rotateObject(Object * object, vec3 axis, float angle){
+  //Calculate current rotation matrix
+  mat4 rotationMatrix;
+  glm_euler_xyz((vec3){deg2rad(object->rot.x),
+                  deg2rad(object->rot.y),
+                  deg2rad(object->rot.z)},
+                  rotationMatrix);
+
+  //Make the rotation along the specified axis;
+  //Calculate the delta rotation matrix newRot
+  mat4 deltaRotation;
+  glm_rotate_make(deltaRotation, deg2rad(angle), axis);
+
+
+  //Calculate the new rotation matrix newRot*newRot
+  mat4 finalRotation;
+  glm_mat4_mul(rotationMatrix, deltaRotation, finalRotation);
+
+  vec3 finalAngles;
+  glm_euler_angles(finalRotation, finalAngles);
+  object->rot.x = rad2deg(finalAngles[0]);
+  object->rot.y = rad2deg(finalAngles[1]);
+  object->rot.z = rad2deg(finalAngles[2]);
 }
 
 /*Here starts the Library related functions*/
@@ -882,12 +932,13 @@ void initUI() {
   treeView->parent = tabView->children[0];
   treeView->onKeyPress = handleTreeViewInput;
   treeView->treeview_properties.highlightMode = 1;
-  treeView->actionHint = "hjkl) Navitate tree view   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis";
+  treeView->actionHint = "hjkl) Navitate tree view    g) Toggle Global Coords   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis";
   treeView->modeHint = "t) Translate  r) Rotate  q) Scale";
   objectTreeView = treeView;
   objectManagerData = malloc(sizeof(ObjectManagerData));
   objectManagerData->movementMode = 1;
   objectManagerData->scaler = 1.0f;
+  objectManagerData->global = 0;
 
 
 
@@ -968,6 +1019,7 @@ void initUI() {
 
 void createAxis(){
   Object * object;
+  /***************Movement Axis*********************/
   object = importStl("../assets/AxisArrow.stl", (Vector3d){1, 1, 1},
            (Vector3d){0, 0, 0});
   object->material->lighting = 0;
@@ -993,40 +1045,168 @@ void createAxis(){
   object->visible = 0;
   object->overlay = 1;
   axisObjects[2] = object;
+
+
+  /***************Rotation axis*********************/
+  object = importStl("../assets/Rotation.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->material->color = (Vector3d){0, 0, 1};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[3] = object;
+
+  object = importStl("../assets/Rotation.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->rot.x = 90;
+  object->material->color = (Vector3d){0, 1, 0};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[4] = object;
+
+  object = importStl("../assets/Rotation.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->rot.y = 90;
+  object->material->color = (Vector3d){1, 0, 0};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[5] = object;
+
+  object = importStl("../assets/Rotation_limit.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->material->color = (Vector3d){0, 0, 1};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[9] = object;
+
+  object = importStl("../assets/Rotation_limit.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->rot.x = 90;
+  object->material->color = (Vector3d){0, 1, 0};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[10] = object;
+
+  object = importStl("../assets/Rotation_limit.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->rot.y = 90;
+  object->material->color = (Vector3d){1, 0, 0};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[11] = object;
+
+  /***************Scale axis*********************/
+  object = importStl("../assets/Scale.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->material->color = (Vector3d){0, 0, 1};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[6] = object;
+
+  object = importStl("../assets/Scale.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->rot.x = 90;
+  object->material->color = (Vector3d){0, 1, 0};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[7] = object;
+
+  object = importStl("../assets/Scale.stl", (Vector3d){1, 1, 1},
+           (Vector3d){0, 0, 0});
+  object->material->lighting = 0;
+  object->rot.y = 90;
+  object->material->color = (Vector3d){1, 0, 0};
+  object->visible = 0;
+  object->overlay = 1;
+  axisObjects[8] = object;
 }
 
 void updateAxis(){
+  for( int i = 0; i<12; i++){
+    axisObjects[i]->visible = 0;
+  }
+
   if (selectedObject == NULL){
-    axisObjects[0]->visible = 0;
-    axisObjects[1]->visible = 0;
-    axisObjects[2]->visible = 0;
     return;
   }
-  axisObjects[0]->visible = 1;
-  axisObjects[1]->visible = 1;
-  axisObjects[2]->visible = 1;
+
+  //Show the correct axis depending on the selected mode
+  int axis_index = (objectManagerData->movementMode-1)*3;
+  axisObjects[axis_index]->visible = 1;
+  axisObjects[axis_index+1]->visible = 1;
+  axisObjects[axis_index+2]->visible = 1;
+
   //Calculate scale based on distance to the object
   Camera activeCamera = viewport->viewport_properties.vp_settings->render_settings->active_camera;
   float axisScale = moduloVector(vect_sum(selectedObject->pos, activeCamera.pos, -1.0f)) * tan(deg2rad(activeCamera.fov)) * 0.01 * 0.5 * 0.25;
+  if (objectManagerData->movementMode == 2) axisScale *= 0.75;
   //activeCamera.pos = selectedObject->pos;
 
-  axisObjects[0]->pos = selectedObject->pos;
-  axisObjects[0]->scale.x = axisScale;
-  axisObjects[0]->scale.y = axisScale;
-  axisObjects[0]->scale.z = axisScale;
+  axisObjects[axis_index]->pos = selectedObject->pos;
+  axisObjects[axis_index]->scale.x = axisScale;
+  axisObjects[axis_index]->scale.y = axisScale;
+  axisObjects[axis_index]->scale.z = axisScale;
 
-  axisObjects[1]->pos = selectedObject->pos;
-  axisObjects[1]->scale.x = axisScale;
-  axisObjects[1]->scale.y = axisScale;
-  axisObjects[1]->scale.z = axisScale;
+  axisObjects[axis_index+1]->pos = selectedObject->pos;
+  axisObjects[axis_index+1]->scale.x = axisScale;
+  axisObjects[axis_index+1]->scale.y = axisScale;
+  axisObjects[axis_index+1]->scale.z = axisScale;
 
-  axisObjects[2]->pos = selectedObject->pos;
-  axisObjects[2]->scale.x = axisScale;
-  axisObjects[2]->scale.y = axisScale;
-  axisObjects[2]->scale.z = axisScale;
-  
+  axisObjects[axis_index+2]->pos = selectedObject->pos;
+  axisObjects[axis_index+2]->scale.x = axisScale;
+  axisObjects[axis_index+2]->scale.y = axisScale;
+  axisObjects[axis_index+2]->scale.z = axisScale;
 
 
+  if (objectManagerData->global == 0){
+    axisObjects[axis_index]->rot = selectedObject->rot;
+    axisObjects[axis_index+1]->rot = selectedObject->rot;
+    rotateObject(axisObjects[axis_index+1], (vec3){1, 0, 0}, -90);
+    axisObjects[axis_index+2]->rot = selectedObject->rot;
+    rotateObject(axisObjects[axis_index+2], (vec3){0, 1, 0}, 90);
+  }else{
+    axisObjects[axis_index]->rot = (Vector3d){0, 0, 0};
+    axisObjects[axis_index+1]->rot = (Vector3d){-90, 0, 0};
+    axisObjects[axis_index+2]->rot = (Vector3d){0, 90, 0};
+
+  }
+
+  if (objectManagerData->movementMode == 2){
+    Vector3d objectCameraVector = vect_sum(selectedObject->pos, activeCamera.pos, -1.0f);
+    objectCameraVector = normalizeVector(objectCameraVector);
+    Vector3d objectAxis;
+    for (int i = 0; i<3; i++){
+      mat4 rotationMatrix;
+      glm_euler_xyz((vec3){deg2rad(axisObjects[axis_index+i]->rot.x),
+                      deg2rad(axisObjects[axis_index+i]->rot.y),
+                      deg2rad(axisObjects[axis_index+i]->rot.z)},
+                      rotationMatrix);
+      objectAxis.x = rotationMatrix[2][0];
+      objectAxis.y = rotationMatrix[2][1];
+      objectAxis.z = rotationMatrix[2][2];
+
+      objectAxis = normalizeVector(objectAxis);
+
+      float angle = rad2deg(anguloEntreVectores(objectAxis, objectCameraVector));
+      debug("Angulo entre eje y camara: %f", angle);
+      if (angle < 20.0f || angle > 160.0f){
+        Object * newRotObject = axisObjects[9+i];
+        Object * oldRotObject = axisObjects[axis_index+i];
+        newRotObject->pos = oldRotObject->pos;
+        newRotObject->rot = oldRotObject->rot;
+        newRotObject->scale = oldRotObject->scale;
+        newRotObject->visible = 1;
+        oldRotObject->visible = 0;
+      }
+    }
+  }
 }
 
 void prepareTerminal() {
