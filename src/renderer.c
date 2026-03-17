@@ -334,18 +334,21 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 
 	//Pass the matrices to the shader
 	mat4 view;
-	vec3 cameraUp = {0.0f, 0.0f, -1.0f};
+	vec3 cameraUp = {currentActiveCam.up.x,
+			currentActiveCam.up.y,
+			currentActiveCam.up.z,
+			};
 	vec3 cameraDir = {currentActiveCam.dir.x, currentActiveCam.dir.y, currentActiveCam.dir.z};
 	vec3 cameraRight;
 	glm_mat4_identity(view);
 	glm_mat4_identity(projection);
 	//debug("Camera dir: %f, %f, %f", cameraDir[0], cameraDir[1], cameraDir[2]);
 
-	glm_normalize(cameraDir);
-	glm_vec3_cross(cameraUp, cameraDir, cameraRight);
-	glm_normalize(cameraRight);
-	glm_vec3_cross(cameraDir, cameraRight, cameraUp);
-	glm_normalize(cameraUp);
+	//glm_normalize(cameraDir);
+	//glm_vec3_cross(cameraUp, cameraDir, cameraRight);
+	//glm_normalize(cameraRight);
+	//glm_vec3_cross(cameraDir, cameraRight, cameraUp);
+	//glm_normalize(cameraUp);
 
 	glm_perspective(glm_rad(currentActiveCam.fov), (float) (viewport_settings->render_settings->screen_width)/ (float) (viewport_settings->render_settings->screen_height), 1.0f, 10000.0f, projection);
 	glm_look((vec3) { currentActiveCam.pos.x, currentActiveCam.pos.y, currentActiveCam.pos.z}, cameraDir, cameraUp, view);

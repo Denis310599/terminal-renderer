@@ -35,6 +35,8 @@ typedef struct Container {
 
 typedef struct Viewport {
   ViewportSettings *vp_settings;
+  float movementScaler;
+  Vector3d rotationPoint;
 } Viewport;
 
 typedef struct TabView {
@@ -91,6 +93,8 @@ typedef struct ObjectManagerData{
   int movementMode; // 0 none, 1 move, 2 rotate, 3 scale
   float scaler;
   int global; // 0 False, 1 True
+  int uniformScaling; // 0 False, 1 True
+  TreeViewElement * lastSelectedElement;
 }ObjectManagerData;
 
 typedef struct Style {
@@ -215,6 +219,8 @@ Component *newTreeViewComponent();
 Color *newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
+void handleDefaultInput(Component * cmp, char keypress);
+void handleInputNoFocus(char keypress);
 void closeProgram();
 
 void enable_raw_mode();
@@ -239,6 +245,8 @@ void createAxis();
 
 /*Custom function declaration(aka handlers)*/
 void handleObjectManajerKeyPress(Component *component, char keypress);
+void handleSelectedObjectAction(char keypress, float scaler);
+void handleViewportInput(Component * component, char keypress);
 
 /*Color deffinitions*/
 const Color BG_COLOR = (Color){7, 18, 36};
@@ -259,6 +267,7 @@ Component parentComponent;
 Component *focusComponent;
 ComponentTable cmpsToUpdate;
 Component *viewport;
+Component * objectManagerComponent;
 Component * objectTreeView = NULL;
 TreeViewElement * selectedTreeElem = NULL;
 Object * selectedObject = NULL;
@@ -316,6 +325,8 @@ void handleTreeViewInput(Component *component, char keypress) {
   debug("Handling keypress in TreeView");
   int updateThisCMP = 0;
   int redrawWholeComponent = 0;
+  Component * selectedCmp;
+  float scaler = objectManagerData->scaler;
   // For moving, if hightLight mode 0: regular up and down
   // if highLight mode 1: Jump across brothers and auto jump to parents and
   // uncles
@@ -393,34 +404,23 @@ void handleTreeViewInput(Component *component, char keypress) {
         component->treeview_properties.selectedElement->collapsed =
             !component->treeview_properties.selectedElement->collapsed;
       }
-  }
-  //debug("New selected element: %s", component->treeview_properties.selectedElement->texts.table[2]);
-  if (updateThisCMP) debug("New selected element: %d", component->treeview_properties.selectedElement);
-  if(redrawWholeComponent){
-    //Mark all elements as updated
-    updateComponent(component->parent, 1);
-    TreeViewElement * current = component->treeview_properties.child;
-    while(current != NULL){
-      //current->isUpdated = 1;
-      current = getNextTreeViewElement(current, current->collapsed);
-    }
-  }else{
-    debug("Updating treeView component %d", component);
-    updateComponent(component->parent, 0);
-  }
-
-
-  Component * selectedCmp;
-  float scaler = objectManagerData->scaler;
-  switch (keypress) {
     case 'r':
       objectManagerData->movementMode = 2;
+      break;
+    case 'n':
+      //New object
+      loadNewObject("../assets/teapot.stl", 0);
+      updateThisCMP = 0;
       break;
     case 't':
       objectManagerData->movementMode = 1;
       break;
     case 'q':
       objectManagerData->movementMode = 3;
+      break;
+    case 'f':
+      if (objectManagerData->movementMode == 3)
+        objectManagerData->uniformScaling = !objectManagerData->uniformScaling;
       break;
     case '+':
       objectManagerData->scaler *= 10;
@@ -430,10 +430,6 @@ void handleTreeViewInput(Component *component, char keypress) {
       break;
     case 'g':
       objectManagerData->global = !objectManagerData->global;
-      break;
-    case 'n':
-      //New object
-      loadNewObject("../assets/teapot.stl", 0);
       break;
     case 'w':
     case 'a':
@@ -449,146 +445,236 @@ void handleTreeViewInput(Component *component, char keypress) {
 
       // selectedElement->data = void *
       selectedTreeElem = selectedCmp->treeview_properties.selectedElement;
-      debug("Current selected tree element: %d", selectedTreeElem); 
       selectedObject = (Object *) selectedTreeElem->data;
-      debug("Moving selected object: %d", selectedObject);
-      //Object * selectedObject = selectedCmp->treeview_properties.selectedElement.data;
-      switch (objectManagerData->movementMode) {
-        case (1):
-          // Move
-          if (objectManagerData->global){
-            switch (keypress){
-              case 'w': selectedObject->pos.x += scaler; break;
-              case 's': selectedObject->pos.x -= scaler; break;
-              case 'a': selectedObject->pos.y -= scaler; break;
-              case 'd': selectedObject->pos.y += scaler; break;
-              case 'A': selectedObject->pos.z -= scaler; break;
-              case 'D': selectedObject->pos.z += scaler; break;
-              default: ;
-            }
-          }else{
-            mat4 rotationMatrix;
-            glm_euler_xyz((vec3){deg2rad(selectedObject->rot.x),
-                            deg2rad(selectedObject->rot.y),
-                            deg2rad(selectedObject->rot.z)},
-                            rotationMatrix);
-            Vector3d axis;
-            switch (keypress){
-              case 'w':
-              case 's': 
-                axis.x = rotationMatrix[0][0];
-                axis.y = rotationMatrix[0][1];
-                axis.z = rotationMatrix[0][2];
-                break;
-              case 'a':
-              case 'd': 
-                axis.x = rotationMatrix[1][0];
-                axis.y = rotationMatrix[1][1];
-                axis.z = rotationMatrix[1][2];
-                break;
-              case 'A':
-              case 'D': 
-                axis.x = rotationMatrix[2][0];
-                axis.y = rotationMatrix[2][1];
-                axis.z = rotationMatrix[2][2];
-                break;
-              default: ;
-            }
-            axis = normalizeVector(axis);
-            float factor = scaler;
-            if (keypress == 'a'  || keypress == 'A' || keypress == 's'){
-              factor = -scaler;
-            }
-            selectedObject->pos.x += factor * axis.x;
-            selectedObject->pos.y += factor * axis.y;
-            selectedObject->pos.z += factor * axis.z;
-
-          }
-          break;
-        case (3):
-          // Move
-          switch (keypress){
-            case 'w': selectedObject->scale.x -= scaler; break;
-            case 's': selectedObject->scale.x += scaler; break;
-            case 'a': selectedObject->scale.y += scaler; break;
-            case 'd': selectedObject->scale.y -= scaler; break;
-            case 'A': selectedObject->scale.z += scaler; break;
-            case 'D': selectedObject->scale.z -= scaler; break;
-            default: ;
-          }
-          break;
-        case (2):
-          //Rotating
-          //Calculate the current rotation matrix oldRot
-          vec3 axis;
-          float angle = 10.0f * scaler;
-          //Get the axis to spin around
-          switch (keypress){
-            case 'w': 
-              axis[0] = 1;
-              axis[1] = 0;
-              axis[2] = 0;
-              break;
-            case 's': 
-              axis[0] = 1;
-              axis[1] = 0;
-              axis[2] = 0;
-              angle *= -1.0f;
-              break;
-            case 'a': 
-              axis[0] = 0;
-              axis[1] = 1;
-              axis[2] = 0;
-              angle *= -1.0f;
-              break;
-            case 'd': 
-              axis[0] = 0;
-              axis[1] = 1;
-              axis[2] = 0;
-              break;
-            case 'A': 
-              axis[0] = 0;
-              axis[1] = 0;
-              axis[2] = 1;
-              angle *= -1.0f;
-              break;
-            case 'D': 
-              axis[0] = 0;
-              axis[1] = 0;
-              axis[2] = 1;
-              break;
-            default: ;
-          }
-          rotateObject(selectedObject, axis, angle);
-          break;
-      }
+      handleSelectedObjectAction(keypress, scaler);
       break;
+    case 27:
+      focusComponent = NULL;
+      component->treeview_properties.selectedElement = NULL;
+      updateComponent(component, 0);
+      selectedObject = NULL;
+      return;
+
+  }
+
   
+  //debug("New selected element: %s", component->treeview_properties.selectedElement->texts.table[2]);
+  if (updateThisCMP) debug("New selected element: %d", component->treeview_properties.selectedElement);
+  if(redrawWholeComponent){
+    //Mark all elements as updated
+    updateComponent(component->parent, 1);
+    TreeViewElement * current = component->treeview_properties.child;
+    while(current != NULL){
+      //current->isUpdated = 1;
+      current = getNextTreeViewElement(current, current->collapsed);
+    }
   }
   
+  // Update selected object
   selectedTreeElem = component->treeview_properties.selectedElement;
+  objectManagerData->lastSelectedElement = selectedTreeElem;
   if (selectedTreeElem != NULL){
     selectedObject = (Object *) selectedTreeElem->data;
   }
 
+  //Update the text label on the command status
   char * commandHint = malloc(sizeof(char) * 100);
   switch (objectManagerData->movementMode){
     case (1):
-      sprintf(commandHint, "Translating...");
+      sprintf(commandHint, "Translating");
       break;
     case (2):
-      sprintf(commandHint, "Rotating...");
+      sprintf(commandHint, "Rotating");
       break;
     case (3):
-      sprintf(commandHint, "Scaling...");
+      sprintf(commandHint, "Scaling");
       break;
   }
   sprintf(commandHint, "%s - x%.2f", commandHint, objectManagerData->scaler);
   commandHintComponent->text_properties.content = commandHint;
 
+  //Update the text label on the actions hint
+  char * actionHint = malloc(sizeof(char) * 1000);
+  actionHint[0] = '\0';
+  if (objectManagerData->movementMode == 3){
+    if (objectManagerData->uniformScaling == 1){
+      sprintf(actionHint, "f) Disable uniform scaling   ");
+    }else{
+      sprintf(actionHint, "f) Enable uniform scaling   ");
+    }
+  }
+
+  if (objectManagerData->global == 1){
+    sprintf(actionHint, "%sg) Disable global mode   ", actionHint);
+  }else{
+    sprintf(actionHint, "%sg) Enable global mode   ", actionHint);
+  }
+
+  char * staticString = "hjkl) Navitate tree view   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis";
+  sprintf(actionHint, "%s%s", actionHint, staticString);
+  component->actionHint = actionHint;
+
   // component->isUpdated = 1;
   if (updateThisCMP) updateComponent(component, 0);
   //updateComponent(objectTreeView, 0);
+}
+
+void handleSelectedObjectAction(char keypress, float scaler){
+  switch (objectManagerData->movementMode) {
+    case (1):
+      // Move
+      if (objectManagerData->global){
+        switch (keypress){
+          case 'w': selectedObject->pos.x += scaler; break;
+          case 's': selectedObject->pos.x -= scaler; break;
+          case 'a': selectedObject->pos.y -= scaler; break;
+          case 'd': selectedObject->pos.y += scaler; break;
+          case 'A': selectedObject->pos.z -= scaler; break;
+          case 'D': selectedObject->pos.z += scaler; break;
+          default: ;
+        }
+      }else{
+        mat4 rotationMatrix;
+        glm_euler_xyz((vec3){deg2rad(selectedObject->rot.x),
+                        deg2rad(selectedObject->rot.y),
+                        deg2rad(selectedObject->rot.z)},
+                        rotationMatrix);
+        Vector3d axis;
+        switch (keypress){
+          case 'w':
+          case 's': 
+            axis.x = rotationMatrix[0][0];
+            axis.y = rotationMatrix[0][1];
+            axis.z = rotationMatrix[0][2];
+            break;
+          case 'a':
+          case 'd': 
+            axis.x = rotationMatrix[1][0];
+            axis.y = rotationMatrix[1][1];
+            axis.z = rotationMatrix[1][2];
+            break;
+          case 'A':
+          case 'D': 
+            axis.x = rotationMatrix[2][0];
+            axis.y = rotationMatrix[2][1];
+            axis.z = rotationMatrix[2][2];
+            break;
+          default: ;
+        }
+        axis = normalizeVector(axis);
+        float factor = scaler;
+        if (keypress == 'a'  || keypress == 'A' || keypress == 's'){
+          factor = -scaler;
+        }
+        selectedObject->pos.x += factor * axis.x;
+        selectedObject->pos.y += factor * axis.y;
+        selectedObject->pos.z += factor * axis.z;
+
+      }
+      break;
+    case (3):
+      // Scale
+      if (objectManagerData->uniformScaling == 1){
+        float factor = scaler;
+        if (keypress == 'a'  || keypress == 'A' || keypress == 's'){
+          factor = -scaler;
+        }
+        selectedObject->scale.x += factor;
+        selectedObject->scale.y += factor;
+        selectedObject->scale.z += factor;
+      }else if(objectManagerData->global == 0){
+        switch (keypress){
+          case 'w': selectedObject->scale.x -= scaler; break;
+          case 's': selectedObject->scale.x += scaler; break;
+          case 'a': selectedObject->scale.y += scaler; break;
+          case 'd': selectedObject->scale.y -= scaler; break;
+          case 'A': selectedObject->scale.z += scaler; break;
+          case 'D': selectedObject->scale.z -= scaler; break;
+          default: ;
+        }
+      }else{
+        mat4 rotationMatrix;
+        glm_euler_xyz((vec3){deg2rad(selectedObject->rot.x),
+                        deg2rad(selectedObject->rot.y),
+                        deg2rad(selectedObject->rot.z)},
+                        rotationMatrix);
+        Vector3d axis;
+        switch (keypress){
+          case 'w':
+          case 's': 
+            axis.x = rotationMatrix[0][0];
+            axis.y = rotationMatrix[0][1];
+            axis.z = rotationMatrix[0][2];
+            break;
+          case 'a':
+          case 'd': 
+            axis.x = rotationMatrix[1][0];
+            axis.y = rotationMatrix[1][1];
+            axis.z = rotationMatrix[1][2];
+            break;
+          case 'A':
+          case 'D': 
+            axis.x = rotationMatrix[2][0];
+            axis.y = rotationMatrix[2][1];
+            axis.z = rotationMatrix[2][2];
+            break;
+          default: ;
+        }
+        axis = normalizeVector(axis);
+        float factor = scaler;
+        if (keypress == 'a'  || keypress == 'A' || keypress == 's'){
+          factor = -scaler;
+        }
+        selectedObject->scale.x += factor * axis.x;
+        selectedObject->scale.y += factor * axis.y;
+        selectedObject->scale.z += factor * axis.z;
+      }
+      break;
+    case (2):
+      //Rotating
+      //Calculate the current rotation matrix oldRot
+      vec3 axis;
+      float angle = 10.0f * scaler;
+      //Get the axis to spin around
+      switch (keypress){
+        case 'w': 
+          axis[0] = 1;
+          axis[1] = 0;
+          axis[2] = 0;
+          break;
+        case 's': 
+          axis[0] = 1;
+          axis[1] = 0;
+          axis[2] = 0;
+          angle *= -1.0f;
+          break;
+        case 'a': 
+          axis[0] = 0;
+          axis[1] = 1;
+          axis[2] = 0;
+          angle *= -1.0f;
+          break;
+        case 'd': 
+          axis[0] = 0;
+          axis[1] = 1;
+          axis[2] = 0;
+          break;
+        case 'A': 
+          axis[0] = 0;
+          axis[1] = 0;
+          axis[2] = 1;
+          angle *= -1.0f;
+          break;
+        case 'D': 
+          axis[0] = 0;
+          axis[1] = 0;
+          axis[2] = 1;
+          break;
+        default: ;
+      }
+      rotateObject(selectedObject, axis, angle);
+      break;
+  }
 }
 
 /*Function that handles the default operation of a cmp. It passes the onclick to
@@ -599,6 +685,125 @@ void handleDefaultInput(Component *component, char keypress) {
       component->children[i]->onKeyPress(component->children[i], keypress);
       break;
     }
+  }
+}
+
+void handleInputNoFocus(char keypress){
+  switch (keypress){
+    case '1':
+      focusComponent = viewport;
+      break;
+    case '2':
+      focusComponent = objectManagerComponent;
+      selectedObject = objectManagerData->lastSelectedElement->data;
+      selectedTreeElem = objectManagerData->lastSelectedElement;
+      objectTreeView->treeview_properties.selectedElement = selectedTreeElem;
+      updateComponent(objectManagerComponent, 0);
+      break;
+  }
+}
+
+
+void handleViewportInput(Component * component, char keypress){
+  //Vector3d cameraPosition = ACTIVE_CAMERA.pos;
+  Camera myCam = viewport->viewport_properties.vp_settings->render_settings->active_camera;
+  switch (keypress){
+    case 27:
+      focusComponent = NULL;
+      break;
+
+    case 'w':
+    case 'a':
+    case 's':
+    case 'd':
+    case 'i':
+    case 'o':
+      //Movement
+      float scaler = viewport->viewport_properties.movementScaler;
+      Vector3d movVector;
+
+      //Get the movement vector and scaler
+      switch(keypress){
+        case 'w': 
+          movVector = myCam.up;
+          scaler *= -1;
+          break;
+        case 's':
+          movVector = myCam.up;
+          break;
+        case 'd': 
+          movVector = myCam.side;
+          scaler *= -1;
+          break;
+        case 'a':
+          movVector = myCam.side;
+          break;
+        case 'i': 
+          movVector = myCam.dir;
+          break;
+        case 'o':
+          movVector = myCam.dir;
+          scaler *= -1;
+          break;
+      }
+      //Transpose the camera position to the new location
+      myCam.pos = vect_sum(myCam.pos, movVector, scaler);
+      viewport->viewport_properties.vp_settings->render_settings->active_camera.pos = myCam.pos;
+
+      //Calculate the new rotation point
+      break;
+
+    case '+':
+      viewport->viewport_properties.movementScaler *= 10;
+      break;
+    case '-':
+      viewport->viewport_properties.movementScaler /= 10;
+      break;
+
+    case 'W':
+    case 'A':
+    case 'S':
+    case 'D':
+      //Rotation
+      //Rotate around the rotation point and camera up vector
+      Vector3d rotationVector;
+      debug("Old camera coords: %.2f, %.2f, %.2f", myCam.pos.x, myCam.pos.y, myCam.pos.z);
+      float rotationAngle = viewport->viewport_properties.movementScaler;
+      switch(keypress){
+        case 'W': 
+          rotationVector = myCam.side;
+          rotationAngle *= -1;
+          break;
+        case 'S':
+          rotationVector = myCam.side;
+          break;
+        case 'D': 
+          rotationVector = myCam.up;
+          break;
+        case 'A':
+          rotationVector = myCam.up;
+          rotationAngle *= -1;
+          break;
+      }
+      Vector3d rotationPoint = viewport->viewport_properties.rotationPoint;
+      Quaternion rotationQuat = newQuat(rotationVector, deg2rad(rotationAngle));
+
+      //Calculate the new coordinates
+      myCam.pos = vect_translation(myCam.pos, rotationPoint, 1);
+      myCam.pos = vect_rot(myCam.pos, rotationQuat);
+      myCam.pos = vect_translation(myCam.pos, rotationPoint, 0);
+
+      //Rotate the camera vectors in the inverse angle as the camera rotation for stay focusing the same point
+      //rotationQuat = newQuat(rotationVector, deg2rad(-rotationAngle));
+      myCam.up = vect_rot(myCam.up, rotationQuat);
+      myCam.side = vect_rot(myCam.side, rotationQuat);
+      myCam.dir = vect_rot(myCam.dir, rotationQuat);
+
+      //Update the camera
+      viewport->viewport_properties.vp_settings->render_settings->active_camera = myCam;
+      debug("New camera coords: %.2f, %.2f, %.2f", myCam.pos.x, myCam.pos.y, myCam.pos.z);
+      break;
+
   }
 }
 
@@ -869,6 +1074,7 @@ void initUI() {
   child->autoHeight = 2;
   child->backgroundColor = BG_COLOR;
   child->isUpdated = 1;
+  child->onKeyPress = handleViewportInput;
 
   Camera myCam;
   // myCam.pos = (Vector3d){15, 0, 8};
@@ -877,12 +1083,17 @@ void initUI() {
   myCam.dir = (Vector3d){0, 0, 1};
   myCam.fov = 45;
   myCam.dir = normalizeVector(vect_sum((Vector3d){0, 0, 1}, myCam.pos, -1));
+  myCam.side = normalizeVector(vectProd(myCam.dir, (Vector3d){0, 0, 1}));
+  myCam.up = normalizeVector(vectProd(myCam.dir, myCam.side));
   child->viewport_properties.vp_settings->render_settings->active_camera =
       myCam;
+  child->viewport_properties.movementScaler = 1.0f;
+  child->viewport_properties.rotationPoint = (Vector3d){0, 0, 0};
 
 
   parentComponent.children[5]->children[0] = child;
   viewport = child;
+  viewport->actionHint = "wasd) Move camera    WASD) Rotate Camera    +-) Change multiplier    io) Zoom In/Out";
 
   /*Object Manager*/
   Component *objectContainer = parentComponent.children[3];
@@ -932,7 +1143,7 @@ void initUI() {
   treeView->parent = tabView->children[0];
   treeView->onKeyPress = handleTreeViewInput;
   treeView->treeview_properties.highlightMode = 1;
-  treeView->actionHint = "hjkl) Navitate tree view    g) Toggle Global Coords   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis";
+  treeView->actionHint = "";
   treeView->modeHint = "t) Translate  r) Rotate  q) Scale";
   objectTreeView = treeView;
   objectManagerData = malloc(sizeof(ObjectManagerData));
@@ -1009,6 +1220,7 @@ void initUI() {
   // text1->width = 25; 
   matCont->children[0] = text1;
 
+  objectManagerComponent = objectContainer;
   focusComponent = objectContainer->children[0];
 
   // updateComponent(&parentComponent, 1);
@@ -1320,6 +1532,7 @@ int handleInput() {
         return 1;
         break;
       case '[':
+        if (focusComponent == NULL) return 0;
         if (read(STDIN_FILENO, &ch, 1) == 0) return 0;
         debug("Char presser: %c", ch);
         switch (ch){ // Up, Down, Right, Left
@@ -1332,7 +1545,8 @@ int handleInput() {
         break;
     }
     // Pass the event to the focused component
-    focusComponent->onKeyPress(focusComponent, ch);
+    if (focusComponent == NULL) handleInputNoFocus(ch);
+    else focusComponent->onKeyPress(focusComponent, ch);
   }
   return 0;
 }

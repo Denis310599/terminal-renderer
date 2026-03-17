@@ -175,7 +175,7 @@ void postProcessFrameToChar(Pixel * frameBuffer, char * output){
 Object * importStl(char * path, Vector3d scale, Vector3d pos){
 	debug("Importing STL: %s", path);
 	FILE * p_file;
-  unsigned char buffer[50*4];
+	unsigned char buffer[50*4];
 
 	//Open the file
 	p_file = fopen(path, "r");
