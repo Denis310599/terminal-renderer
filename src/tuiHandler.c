@@ -247,6 +247,8 @@ void createAxis();
 void handleObjectManajerKeyPress(Component *component, char keypress);
 void handleSelectedObjectAction(char keypress, float scaler);
 void handleViewportInput(Component * component, char keypress);
+void calculateCommandHintObjectManager();
+void calculateCommnandHintViewport();
 
 /*Color deffinitions*/
 const Color BG_COLOR = (Color){7, 18, 36};
@@ -330,6 +332,11 @@ void handleTreeViewInput(Component *component, char keypress) {
   // For moving, if hightLight mode 0: regular up and down
   // if highLight mode 1: Jump across brothers and auto jump to parents and
   // uncles
+
+  if (objectTreeView->treeview_properties.child == NULL
+      && keypress != 27 && keypress != 'n'){
+    return;
+  }
   switch (keypress) {
     case 'k':
       updateThisCMP = 1;
@@ -406,6 +413,7 @@ void handleTreeViewInput(Component *component, char keypress) {
       }
     case 'r':
       objectManagerData->movementMode = 2;
+      addComponentToTable(viewport, &cmpsToUpdate);
       break;
     case 'n':
       //New object
@@ -414,13 +422,15 @@ void handleTreeViewInput(Component *component, char keypress) {
       break;
     case 't':
       objectManagerData->movementMode = 1;
+      addComponentToTable(viewport, &cmpsToUpdate);
       break;
     case 'q':
       objectManagerData->movementMode = 3;
+      addComponentToTable(viewport, &cmpsToUpdate);
       break;
     case 'f':
-      if (objectManagerData->movementMode == 3)
-        objectManagerData->uniformScaling = !objectManagerData->uniformScaling;
+      //if (objectManagerData->movementMode == 3)
+      //  objectManagerData->uniformScaling = !objectManagerData->uniformScaling;
       break;
     case '+':
       objectManagerData->scaler *= 10;
@@ -447,12 +457,14 @@ void handleTreeViewInput(Component *component, char keypress) {
       selectedTreeElem = selectedCmp->treeview_properties.selectedElement;
       selectedObject = (Object *) selectedTreeElem->data;
       handleSelectedObjectAction(keypress, scaler);
+      addComponentToTable(viewport, &cmpsToUpdate);
       break;
     case 27:
       focusComponent = NULL;
       component->treeview_properties.selectedElement = NULL;
       updateComponent(component, 0);
       selectedObject = NULL;
+      commandHintComponent->text_properties.content = "\0";
       return;
 
   }
@@ -472,11 +484,40 @@ void handleTreeViewInput(Component *component, char keypress) {
   
   // Update selected object
   selectedTreeElem = component->treeview_properties.selectedElement;
-  objectManagerData->lastSelectedElement = selectedTreeElem;
+  if (objectManagerData->lastSelectedElement != selectedTreeElem){
+    objectManagerData->lastSelectedElement = selectedTreeElem;
+    addComponentToTable(viewport, &cmpsToUpdate);
+  }
   if (selectedTreeElem != NULL){
     selectedObject = (Object *) selectedTreeElem->data;
   }
 
+  //Calculates the command hint
+  calculateCommandHintObjectManager();
+
+  //Update the text label on the actions hint
+  char * actionHint = malloc(sizeof(char) * 1000);
+  actionHint[0] = '\0';
+
+  if (objectManagerData->global == 1){
+    sprintf(actionHint, "g) Disable global mode   ");
+  }else{
+    sprintf(actionHint, "g) Enable global mode   ");
+  }
+
+  sprintf(actionHint, "%shjkl) Navigate tree view   ", actionHint);
+
+  if (objectManagerData->movementMode != 3){
+    sprintf(actionHint, "%s   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis", actionHint);
+  }
+  component->actionHint = actionHint;
+
+  // component->isUpdated = 1;
+  if (updateThisCMP) updateComponent(component, 0);
+  //updateComponent(objectTreeView, 0);
+}
+
+void calculateCommandHintObjectManager(){
   //Update the text label on the command status
   char * commandHint = malloc(sizeof(char) * 100);
   switch (objectManagerData->movementMode){
@@ -492,32 +533,14 @@ void handleTreeViewInput(Component *component, char keypress) {
   }
   sprintf(commandHint, "%s - x%.2f", commandHint, objectManagerData->scaler);
   commandHintComponent->text_properties.content = commandHint;
-
-  //Update the text label on the actions hint
-  char * actionHint = malloc(sizeof(char) * 1000);
-  actionHint[0] = '\0';
-  if (objectManagerData->movementMode == 3){
-    if (objectManagerData->uniformScaling == 1){
-      sprintf(actionHint, "f) Disable uniform scaling   ");
-    }else{
-      sprintf(actionHint, "f) Enable uniform scaling   ");
-    }
-  }
-
-  if (objectManagerData->global == 1){
-    sprintf(actionHint, "%sg) Disable global mode   ", actionHint);
-  }else{
-    sprintf(actionHint, "%sg) Enable global mode   ", actionHint);
-  }
-
-  char * staticString = "hjkl) Navitate tree view   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis";
-  sprintf(actionHint, "%s%s", actionHint, staticString);
-  component->actionHint = actionHint;
-
-  // component->isUpdated = 1;
-  if (updateThisCMP) updateComponent(component, 0);
-  //updateComponent(objectTreeView, 0);
 }
+
+void calculateCommandHintViewport(){
+  char * commandHint = malloc(sizeof(char) * 100);
+  sprintf(commandHint, "Moving camera - x%.2f", viewport->viewport_properties.movementScaler);
+  commandHintComponent->text_properties.content = commandHint;
+}
+
 
 void handleSelectedObjectAction(char keypress, float scaler){
   switch (objectManagerData->movementMode) {
@@ -574,22 +597,22 @@ void handleSelectedObjectAction(char keypress, float scaler){
       break;
     case (3):
       // Scale
-      if (objectManagerData->uniformScaling == 1){
-        float factor = scaler;
-        if (keypress == 'a'  || keypress == 'A' || keypress == 's'){
-          factor = -scaler;
-        }
-        selectedObject->scale.x += factor;
-        selectedObject->scale.y += factor;
-        selectedObject->scale.z += factor;
-      }else if(objectManagerData->global == 0){
+      //if (objectManagerData->uniformScaling == 1){
+      float factor = scaler;
+      if (keypress == 'a'  || keypress == 'A' || keypress == 's'){
+        factor = -scaler;
+      }
+      selectedObject->scale.x += factor;
+      selectedObject->scale.y += factor;
+      selectedObject->scale.z += factor;
+      /*}else if(objectManagerData->global == 0){
         switch (keypress){
-          case 'w': selectedObject->scale.x -= scaler; break;
-          case 's': selectedObject->scale.x += scaler; break;
-          case 'a': selectedObject->scale.y += scaler; break;
-          case 'd': selectedObject->scale.y -= scaler; break;
-          case 'A': selectedObject->scale.z += scaler; break;
-          case 'D': selectedObject->scale.z -= scaler; break;
+          case 'w': selectedObject->scale.x += scaler; break;
+          case 's': selectedObject->scale.x -= scaler; break;
+          case 'a': selectedObject->scale.y -= scaler; break;
+          case 'd': selectedObject->scale.y += scaler; break;
+          case 'A': selectedObject->scale.z -= scaler; break;
+          case 'D': selectedObject->scale.z += scaler; break;
           default: ;
         }
       }else{
@@ -628,7 +651,8 @@ void handleSelectedObjectAction(char keypress, float scaler){
         selectedObject->scale.x += factor * axis.x;
         selectedObject->scale.y += factor * axis.y;
         selectedObject->scale.z += factor * axis.z;
-      }
+        debug("New scale axis: %.2f, %.2f, %.2f", axis.x, axis.y, axis.z);
+      }*/
       break;
     case (2):
       //Rotating
@@ -692,12 +716,17 @@ void handleInputNoFocus(char keypress){
   switch (keypress){
     case '1':
       focusComponent = viewport;
+      calculateCommandHintViewport();
+      updateComponent(viewport, 0);
       break;
     case '2':
       focusComponent = objectManagerComponent;
-      selectedObject = objectManagerData->lastSelectedElement->data;
-      selectedTreeElem = objectManagerData->lastSelectedElement;
-      objectTreeView->treeview_properties.selectedElement = selectedTreeElem;
+        if (objectManagerData->lastSelectedElement != NULL){
+        selectedObject = objectManagerData->lastSelectedElement->data;
+        selectedTreeElem = objectManagerData->lastSelectedElement;
+        objectTreeView->treeview_properties.selectedElement = selectedTreeElem;
+      }
+      calculateCommandHintObjectManager();
       updateComponent(objectManagerComponent, 0);
       break;
   }
@@ -710,6 +739,8 @@ void handleViewportInput(Component * component, char keypress){
   switch (keypress){
     case 27:
       focusComponent = NULL;
+      commandHintComponent->text_properties.content = "\0";
+      updateComponent(component, 0);
       break;
 
     case 'w':
@@ -751,13 +782,22 @@ void handleViewportInput(Component * component, char keypress){
       viewport->viewport_properties.vp_settings->render_settings->active_camera.pos = myCam.pos;
 
       //Calculate the new rotation point
+      viewport->viewport_properties.rotationPoint = getPixelDepthCoordinates(
+          (int)(viewport->viewport_properties.vp_settings->screen_width/2),
+          (int)(viewport->viewport_properties.vp_settings->screen_height/2),
+          viewport->viewport_properties.vp_settings);
+      addComponentToTable(viewport, &cmpsToUpdate);
       break;
 
     case '+':
       viewport->viewport_properties.movementScaler *= 10;
+      calculateCommandHintViewport();
+      updateComponent(viewport, 0);
       break;
     case '-':
       viewport->viewport_properties.movementScaler /= 10;
+      calculateCommandHintViewport();
+      updateComponent(viewport, 0);
       break;
 
     case 'W':
@@ -768,7 +808,7 @@ void handleViewportInput(Component * component, char keypress){
       //Rotate around the rotation point and camera up vector
       Vector3d rotationVector;
       debug("Old camera coords: %.2f, %.2f, %.2f", myCam.pos.x, myCam.pos.y, myCam.pos.z);
-      float rotationAngle = viewport->viewport_properties.movementScaler;
+      float rotationAngle = viewport->viewport_properties.movementScaler * 10;
       switch(keypress){
         case 'W': 
           rotationVector = myCam.side;
@@ -802,8 +842,8 @@ void handleViewportInput(Component * component, char keypress){
       //Update the camera
       viewport->viewport_properties.vp_settings->render_settings->active_camera = myCam;
       debug("New camera coords: %.2f, %.2f, %.2f", myCam.pos.x, myCam.pos.y, myCam.pos.z);
+      addComponentToTable(viewport, &cmpsToUpdate);
       break;
-
   }
 }
 
@@ -1150,6 +1190,7 @@ void initUI() {
   objectManagerData->movementMode = 1;
   objectManagerData->scaler = 1.0f;
   objectManagerData->global = 0;
+  objectManagerData->lastSelectedElement = NULL;
 
 
 
@@ -2226,7 +2267,7 @@ void drawUI() {
 
   //addComponentToTable(&parentComponent, &cmpsToUpdate);
   // Add viewport to render
-  addComponentToTable(viewport, &cmpsToUpdate);
+  //addComponentToTable(viewport, &cmpsToUpdate);
   // int i = 0/0;
 
   
@@ -2323,8 +2364,14 @@ int calculateHintMessages(Component * component, StringTable * modeHint, StringT
         sprintf(modeHintsString, "%s  %s", modeHintsString, modeHints.table[i]);
       }
     }
-    modeHintsComponent->text_properties.content = modeHintsString;
+    if (focusComponent == NULL){
+      modeHintsComponent->text_properties.content = "1) Viewport    2) Object Manager";
+    }else{
+      sprintf(modeHintsString, "%s  ESC) Exit window focus", modeHintsString);
+      modeHintsComponent->text_properties.content = modeHintsString;
+    }
     debug("New Mode hint: %s", modeHintsString);
+
 
     // Mark components as updated and redraw all
     updateComponent(actionHintsComponent->parent, 1);
@@ -2991,6 +3038,8 @@ Component *newViewport() {
   Component *cont = newContainer();
   cont->component_type = viewport_t;
   cont->viewport_properties.vp_settings = malloc(sizeof(ViewportSettings));
+  cont->viewport_properties.vp_settings->near_clip = 1.0f;
+  cont->viewport_properties.vp_settings->far_clip = 10000.0f;
 
   debug("Create Viewport");
   vp_create_viewport(cont->viewport_properties.vp_settings);

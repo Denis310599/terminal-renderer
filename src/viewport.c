@@ -1,3 +1,4 @@
+#include "./include/glad/glad.h"
 #include <GL/gl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -132,6 +133,40 @@ void vp_render_viewport(ViewportSettings * viewportSettings){
 		printf("FPS %d", fps);
 		fps = 0;
 	}
+}
+
+Vector3d getPixelDepthCoordinates(int x, int y, ViewportSettings * settings){
+	debug("Getting pixel depth coordinates");
+	if (settings->render_settings->gpu_mode == 1){
+		Camera myCam = settings->render_settings->active_camera;
+		float depth;
+
+		//Get the pixel depth
+		glReadPixels(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+		float far_plane = settings->far_clip;
+		float near_plane = settings->near_clip;
+		float ndc = depth * 2.0 - 1.0;
+		depth = (2.0 * near_plane * far_plane) / (far_plane + near_plane - ndc * (far_plane - near_plane));
+		debug("Calculated depth: %.2f", depth);
+		
+
+		//Get screen properties
+		float height = settings->render_settings->screen_height;
+		float width = settings->render_settings->screen_width;
+		float fov = myCam.fov*2;
+		float angle_per_pixel = fov/height;
+		
+		//Get the pixel ray
+		float horizontal_angle = deg2rad(angle_per_pixel * (x - (width/2)));
+		float vertical_angle = deg2rad(angle_per_pixel * (y - (height/2)));
+
+		Vector3d pixel_vector = vect_rot(myCam.dir, newQuat(myCam.up, horizontal_angle));
+		pixel_vector = vect_rot(pixel_vector, newQuat(myCam.side, vertical_angle));
+		Vector3d depthCoordinates = vect_sum(myCam.pos, pixel_vector, depth);
+		debug("Calculated position: %.2f, %.2f, %.2f", depthCoordinates.x, depthCoordinates.y, depthCoordinates.z);
+		return depthCoordinates;
+	}
+	return (Vector3d){0, 0, 0};
 }
 
 

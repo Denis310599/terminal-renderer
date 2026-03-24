@@ -350,7 +350,7 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 	//glm_vec3_cross(cameraDir, cameraRight, cameraUp);
 	//glm_normalize(cameraUp);
 
-	glm_perspective(glm_rad(currentActiveCam.fov), (float) (viewport_settings->render_settings->screen_width)/ (float) (viewport_settings->render_settings->screen_height), 1.0f, 10000.0f, projection);
+	glm_perspective(glm_rad(currentActiveCam.fov), (float) (viewport_settings->render_settings->screen_width)/ (float) (viewport_settings->render_settings->screen_height), viewport_settings->near_clip, viewport_settings->far_clip, projection);
 	glm_look((vec3) { currentActiveCam.pos.x, currentActiveCam.pos.y, currentActiveCam.pos.z}, cameraDir, cameraUp, view);
 	//glm_look((vec3) {0.0f, 0.0f, 0.0f}, cameraDir, cameraUp, view);
 	//glm_lookat((vec3) {ACTIVE_CAMERA.pos.x, 0.0f, ACTIVE_CAMERA.pos.y}, (vec3) {0.0f, 0.0f, 0.0f}, (vec3) {0.0f, 1.0f, 0.0f}, view);
@@ -377,8 +377,10 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 
 	unsigned int modelLoc= glGetUniformLocation(viewport_settings->render_settings->shader_program, "model");
 	unsigned int rotationLoc= glGetUniformLocation(viewport_settings->render_settings->shader_program, "rotation");
+	unsigned int scaleLoc= glGetUniformLocation(viewport_settings->render_settings->shader_program, "scale");
 	mat4 modelMatrix;
 	mat4 rotationMatrix;
+	mat4 scaleMatrix;
 	//For every object we draw it
 	ObjectListNode * current = listaObjetos;
 	while(current != NULL){
@@ -410,6 +412,7 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 			}
 
 			glm_mat4_identity(modelMatrix);
+			glm_mat4_identity(scaleMatrix);
 			//Translate
 			glm_translate(modelMatrix, 
 				(vec3){
@@ -418,7 +421,7 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 					current->object.pos.z,
 					});
 			//Scale
-			glm_scale(modelMatrix, 
+			glm_scale(scaleMatrix, 
 				(vec3){
 					current->object.scale.x,
 					current->object.scale.y,
@@ -450,6 +453,7 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 			//glm_mat4_mul(xRot, modelMatrix, modelMatrix);
 			//glm_mat4_mul(yRot, modelMatrix, modelMatrix);
 
+			glUniformMatrix4fv(scaleLoc, 1, GL_FALSE, (float *)scaleMatrix);
 			glUniformMatrix4fv(modelLoc, 1, GL_FALSE, (float *)modelMatrix);
 			glUniformMatrix4fv(rotationLoc, 1, GL_FALSE, (float *)rotationMatrix);
 
@@ -477,6 +481,7 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 	glReadPixels(0, 0, viewport_settings->render_settings->screen_width, viewport_settings->render_settings->screen_height, GL_RGB, GL_UNSIGNED_BYTE, pixelData);
 	debug("Data returned");
 }
+
 
 //Function that reads and sets up the fragment sharder
 unsigned int setUpShader(char * pathToFragment, char * pathToVertex){
@@ -514,8 +519,8 @@ unsigned int setUpShader(char * pathToFragment, char * pathToVertex){
 		fclose (v);
 	}
 	
-	debug("Fragment Shader\n %s", fShaderCode);
-	debug("Vertex Shader\n %s", vShaderCode);
+	debug("Fragment Shader\n %s\n===================", fShaderCode);
+	debug("Vertex Shader\n %s\n=====================", vShaderCode);
 
 	if (!vShaderCode || !fShaderCode){return -1;}
 
@@ -622,7 +627,7 @@ int loadModelGPU(Object * modelToLoad){
 	debug("Vertice modelo cargadp: %f %f %f.",vertices[0], vertices[1], vertices[2]);
 	debug("Vertice modelo cargadp: %f %f %f.",vertices[3], vertices[4], vertices[5]);
 	debug("Vertice modelo cargadp: %f %f %f.",vertices[6], vertices[7], vertices[8]);
-  float vertices2[] = {
+	float vertices2[] = {
          0.5f,  0.5f, 0.0f,  // top right
          0.5f, -0.5f, 0.0f,  // bottom right
         -0.5f, -0.5f, 0.0f
