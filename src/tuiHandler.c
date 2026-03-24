@@ -83,11 +83,46 @@ typedef struct TreeView {
   TreeViewElement *child;
   TreeViewElement *selectedElement;
   int nColors;
-  Color *colors; // bg/txt Select, hover, idle
+  Color *colors; // bg/txt Select, hover, idle alternating...
   int offset;
   int snapElement;
   int highlightMode; // 0 highlight child context, 1 hightlight siblins context
 } TreeView;
+
+enum SettingFieldType { title_s, number_s, text_s, list_s, check_s};
+
+typedef struct TitleSetting{
+  char * value;
+  void * textComponent;
+} TitleSetting;
+
+typedef struct NumberSetting{
+  int float_type; // 0 int, 1 float
+  union{
+    float float_value;
+    int int_value;
+  };
+  float multiplyer;
+} NumberSetting;
+
+
+typedef struct SettingsElement {
+  struct SettingsElement *previousElement;
+  struct SettingsElement *nextElement;
+  enum SettingFieldType fieldType;
+  union{
+    TitleSetting title_data;
+    NumberSetting number_data;
+  };
+} SettingsElement;
+
+typedef struct Settings{
+  int currentFocus;
+  int editing;
+  int nColors;
+  Color *colors; // bg-fg hover, idle alternating...
+  SettingsElement * child;
+} Settings;
 
 typedef struct ObjectManagerData{
   int movementMode; // 0 none, 1 move, 2 rotate, 3 scale
@@ -106,7 +141,7 @@ typedef struct Style {
   char **borderColor;
 } Style;
 
-enum ComponentType { container_t, viewport_t, tabview_t, text_t, treeview_t };
+enum ComponentType { container_t, viewport_t, tabview_t, text_t, treeview_t, settings_t };
 typedef struct Component {
   // Basic config
   enum ComponentType component_type;
@@ -125,6 +160,7 @@ typedef struct Component {
   int isUpdated;
   int calculatedMaxHeight;
   int calculatedMaxWidth;
+  int isVisible;
 
   // Dynamic positioning
   struct Component *topToTopOf;
@@ -155,7 +191,7 @@ typedef struct Component {
   float widthBias; // Percentage of width. -1 if default value.
 
   // Function handlers
-  void (*onKeyPress)(struct Component *, char keypress);
+  int (*onKeyPress)(struct Component *, char keypress);
 
   //Hint
   char * modeHint;
@@ -173,6 +209,7 @@ typedef struct Component {
     TabView tabview_properties;
     Text text_properties;
     TreeView treeview_properties;
+    Settings settings_properties;
   };
   int childCount;
   struct Component *parent;
@@ -195,6 +232,7 @@ void drawViewport(Component *component, Component *parent);
 void drawTabView(Component *component, Component *parent);
 void drawTextComponent(Component *component);
 void drawTreeView(Component *component);
+void drawSettingsComponent(Component *component);
 void printText(int x, int y, char *text, Color bg, Color fg);
 void updateComponent(Component *component, int resize);
 void markComponentResized(Component *component);
@@ -216,10 +254,13 @@ Component *newTabView();
 Component *newTextComponent(char *text);
 TreeViewElement *newTreeViewElement(TreeViewElement *parent, int isChild);
 Component *newTreeViewComponent();
+Component * newSettingsComponent();
+SettingsElement * newSettingsElement(SettingsElement * prevElement, SettingsElement * nextElement);
+SettingsElement * newSettingsTitleElement(SettingsElement * prevElement, SettingsElement * nextElement, char * content);
 Color *newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
-void handleDefaultInput(Component * cmp, char keypress);
+int handleDefaultInput(Component * cmp, char keypress);
 void handleInputNoFocus(char keypress);
 void closeProgram();
 
@@ -244,9 +285,9 @@ void rotateObject(Object * object, vec3 axis, float angle);
 void createAxis();
 
 /*Custom function declaration(aka handlers)*/
-void handleObjectManajerKeyPress(Component *component, char keypress);
+int handleObjectManajerKeyPress(Component *component, char keypress);
 void handleSelectedObjectAction(char keypress, float scaler);
-void handleViewportInput(Component * component, char keypress);
+int handleViewportInput(Component * component, char keypress);
 void calculateCommandHintObjectManager();
 void calculateCommnandHintViewport();
 
@@ -280,8 +321,25 @@ ObjectManagerData * objectManagerData;
 Object * axisObjects[12];
 
 /*Handler deffinition*/
-void handleObjectManajerKeyPress(Component *component, char keypress) {
+int handleObjectPropertiesKeyPress(Component * component, char keypress){
+  if (component->isVisible == 0){
+    return 0;
+  }
+  switch(keypress){
+    case 27:
+        component->isVisible = 0;
+        component->parent->children[0]->isVisible = 1;
+        updateComponent(component->parent, 0);
+  }
+  return 1;
+}
+int handleObjectManajerKeyPress(Component *component, char keypress) {
   debug("Handling keypress in ObjectManager");
+  int inputHandled = 1;
+  //Not handle input if not visible
+  if (component->isVisible == 0){
+    return 0;
+  } 
   int updateThisCMP = 0;
   Component * selectedCmp;
   switch (keypress) {
@@ -304,10 +362,12 @@ void handleObjectManajerKeyPress(Component *component, char keypress) {
     if (component->tabview_properties.selectedTab < component->childCount &&
         component->children[component->tabview_properties.selectedTab]
                 ->onKeyPress != NULL) {
-      component->children[component->tabview_properties.selectedTab]
-          ->onKeyPress(
-              component->children[component->tabview_properties.selectedTab],
-              keypress);
+        inputHandled = component->children[component->tabview_properties.selectedTab]
+            ->onKeyPress(
+                component->children[component->tabview_properties.selectedTab],
+                keypress);
+    }else{
+      inputHandled = 0;
     }
   }
   // component->isUpdated = 1;
@@ -315,7 +375,10 @@ void handleObjectManajerKeyPress(Component *component, char keypress) {
 
 
   if (component->tabview_properties.selectedTab >= component->childCount)
-    return;
+    return 0;
+  else{
+    return inputHandled;
+  }
   // updateComponent(
   // component->children[component->tabview_properties.selectedTab], 0);
   // component->children[component->tabview_properties.selectedTab]->isUpdated =
@@ -323,9 +386,13 @@ void handleObjectManajerKeyPress(Component *component, char keypress) {
 }
 
 /*Function that handles the tree view of the object manager*/
-void handleTreeViewInput(Component *component, char keypress) {
+int handleTreeViewInput(Component *component, char keypress) {
   debug("Handling keypress in TreeView");
   int updateThisCMP = 0;
+  int inputHandled = 1;
+  if (component->isVisible == 0){
+    return 0;
+  } 
   int redrawWholeComponent = 0;
   Component * selectedCmp;
   float scaler = objectManagerData->scaler;
@@ -335,7 +402,7 @@ void handleTreeViewInput(Component *component, char keypress) {
 
   if (objectTreeView->treeview_properties.child == NULL
       && keypress != 27 && keypress != 'n'){
-    return;
+    return 1;
   }
   switch (keypress) {
     case 'k':
@@ -465,9 +532,14 @@ void handleTreeViewInput(Component *component, char keypress) {
       updateComponent(component, 0);
       selectedObject = NULL;
       commandHintComponent->text_properties.content = "\0";
-      return;
-
-  }
+      return 1;
+    case '\n':
+      component->isVisible = 0;
+      component->parent->children[1]->isVisible = 1;
+      updateComponent(component->parent, 0);
+    default:
+      inputHandled = 0;
+    }
 
   
   //debug("New selected element: %s", component->treeview_properties.selectedElement->texts.table[2]);
@@ -515,6 +587,7 @@ void handleTreeViewInput(Component *component, char keypress) {
   // component->isUpdated = 1;
   if (updateThisCMP) updateComponent(component, 0);
   //updateComponent(objectTreeView, 0);
+  return inputHandled;
 }
 
 void calculateCommandHintObjectManager(){
@@ -703,13 +776,14 @@ void handleSelectedObjectAction(char keypress, float scaler){
 
 /*Function that handles the default operation of a cmp. It passes the onclick to
  * the first available child*/
-void handleDefaultInput(Component *component, char keypress) {
+int handleDefaultInput(Component *component, char keypress) {
   for (int i = 0; i < component->childCount; i++) {
     if (component->children[i]->onKeyPress != NULL) {
-      component->children[i]->onKeyPress(component->children[i], keypress);
-      break;
+      int result = component->children[i]->onKeyPress(component->children[i], keypress);
+      if (result == 1) return 1;
     }
   }
+  return 0;
 }
 
 void handleInputNoFocus(char keypress){
@@ -733,7 +807,8 @@ void handleInputNoFocus(char keypress){
 }
 
 
-void handleViewportInput(Component * component, char keypress){
+int handleViewportInput(Component * component, char keypress){
+  int inputHandled = 1;
   //Vector3d cameraPosition = ACTIVE_CAMERA.pos;
   Camera myCam = viewport->viewport_properties.vp_settings->render_settings->active_camera;
   switch (keypress){
@@ -844,7 +919,11 @@ void handleViewportInput(Component * component, char keypress){
       debug("New camera coords: %.2f, %.2f, %.2f", myCam.pos.x, myCam.pos.y, myCam.pos.z);
       addComponentToTable(viewport, &cmpsToUpdate);
       break;
+    default:
+      inputHandled = 0;
   }
+
+  return inputHandled;
 }
 
 /*Function that imports a new object to the scene
@@ -1170,8 +1249,8 @@ void initUI() {
   tabView->children[0]->autoHeight = 2;
   tabView->children[0]->border = 0;
 
-  tabView->children[0]->children = malloc(sizeof(Component *));
-  tabView->children[0]->childCount = 1;
+  tabView->children[0]->children = malloc(sizeof(Component *)*2);
+  tabView->children[0]->childCount = 2;
   tabView->children[0]->children[0] = newTreeViewComponent();
   Component *treeView = tabView->children[0]->children[0];
   treeView->topToTopOf = tabView->children[0];
@@ -1193,7 +1272,23 @@ void initUI() {
   objectManagerData->lastSelectedElement = NULL;
 
 
+  /*Object properties component*/
+  Component * objectPropertiesCmp = newSettingsComponent();
+  tabView->children[0]->children[1] = objectPropertiesCmp;
+  objectPropertiesCmp->topToTopOf = tabView->children[0];
+  objectPropertiesCmp->bottomToBottomOf = tabView->children[0];
+  objectPropertiesCmp->startToStartOf = tabView->children[0];
+  objectPropertiesCmp->endToEndOf = tabView->children[0];
+  objectPropertiesCmp->parent = tabView->children[0];
 
+  objectPropertiesCmp->autoHeight = 2;
+  objectPropertiesCmp->autoWidth = 2;
+  objectPropertiesCmp->isVisible = 0;
+  objectPropertiesCmp->border = 0;
+  objectPropertiesCmp->onKeyPress = handleObjectPropertiesKeyPress;
+
+  objectPropertiesCmp->settings_properties.child = newSettingsTitleElement(NULL, NULL, "Title test");
+  newSettingsTitleElement(objectPropertiesCmp->settings_properties.child, NULL, "Title test 2");
   /*
   TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
   treeView->treeview_properties.child = treeViewElem;
@@ -1249,7 +1344,7 @@ void initUI() {
   Component *matCont = tabView->children[1];
   matCont->childCount = 1;
   matCont->children = malloc(sizeof(Container *));
-  Component *text1 = newTextComponent("Materials tab is under development");
+  Component * text1 = newTextComponent("Materials tab is under development");
   text1->topToTopOf = matCont;
   text1->bottomToBottomOf = matCont;
   text1->startToStartOf = matCont;
@@ -1607,6 +1702,9 @@ void get_terminal_size(int *rows, int *cols) {
 
 void drawComponent(Component *component, Component *parent) {
   debug("Drawing component %d.", component);
+  if (component->isVisible == 0){
+    return;
+  }
   switch (component->component_type) {
   case container_t:
     drawContainer(component, parent);
@@ -1623,6 +1721,8 @@ void drawComponent(Component *component, Component *parent) {
   case treeview_t:
     drawTreeView(component);
     break;
+  case settings_t:
+    drawSettingsComponent(component);
   }
 }
 
@@ -1912,17 +2012,35 @@ void drawTextComponent(Component *component) {
     strcpy(finalString, "");
     debug("Final string: %s", finalString);
     char *wordToPrint = malloc(sizeof(char) * strlen(stringToPrint));
+    char *currentColor = malloc(sizeof(char) * strlen(stringToPrint));
     int calculatedHeight = 1;
     int wordOffset = 0;
     int lineOffset = 0;
     int firstWord = 1;
     int maxWidth = 0;
+    int readingColor = 0;
+    int printingColor = 0;
     // Calculate string height
     for (int i = 0; i < strlen(stringToPrint) + 1; i++) {
       // For every letter, store each word, and if it fits in width, print it
       debug("Char to print: %c", stringToPrint[i]);
       debug("..WordOffset %d", wordOffset);
       debug("..LineOffset %d", lineOffset);
+
+      if (stringToPrint[i] == '\e'){
+        readingColor = 1;
+        printingColor = 1;
+      }
+      if (readingColor){
+        currentColor[wordOffset] = stringToPrint[i];
+        wordOffset++;
+        if (stringToPrint[i] == 'm'){
+          readingColor = 0;
+          strncat(finalString, currentColor, wordOffset);
+          wordOffset = 0;
+        }
+        continue;
+      }
       if (stringToPrint[i] == ' ' || stringToPrint[i] == '\n' ||
           stringToPrint[i] == '\r' || stringToPrint[i] == '\t' ||
           stringToPrint[i] == '\0') {
@@ -1972,6 +2090,9 @@ void drawTextComponent(Component *component) {
           } else {
             // If next line is available, store the word in next line
             strcat(finalString, "\n");
+            if (printingColor){
+              strcat(finalString, currentColor);
+            }
             strncat(finalString, wordToPrint, wordOffset);
             lineOffset = wordOffset + 1;
             wordOffset = 0;
@@ -2040,6 +2161,7 @@ void drawTextComponent(Component *component) {
     // Free the strings
     free(finalString);
     free(wordToPrint);
+    free(currentColor);
   }
 
   for (int i = 0; i < component->childCount; i++) {
@@ -2245,6 +2367,59 @@ void drawTreeView(Component *component) {
   }
 
   free(stringToPrint);
+}
+
+void drawSettingsComponent(Component *component) {
+  SettingsElement * currentRowElement = component->settings_properties.child;
+  int localRow = 0;
+  component->global_y = component->parent->global_y;
+  component->global_x = component->parent->global_x;
+  int globalY = component->global_y;
+  int globalX = component->global_x;
+  int width = component->real_width;
+  int height = component->real_height;
+  //Iterate over every settings component
+  while (currentRowElement != NULL){
+    //Render each settings component
+    switch (currentRowElement->fieldType) {
+      case title_s:
+        //Title component
+        //Create a text element with the width of the component
+        Component * textComponent = currentRowElement->title_data.textComponent;
+
+        int text_len = strlen(currentRowElement->title_data.value);
+        
+        //Fill the remaining space with blank spaces
+        char * text = malloc(sizeof(char) * (width));
+        memset(text, ' ', width);
+        text[width] = '\0';
+        sprintf(text, "%s", currentRowElement->title_data.value);
+        text[text_len] = ' ';
+        if (textComponent == NULL){
+          textComponent = newTextComponent(text);
+          textComponent->parent = component;
+        }else{
+          if(textComponent->text_properties.content != NULL){
+            free(textComponent->text_properties.content);
+          }
+          textComponent->text_properties.content = text;
+        }
+
+        textComponent->real_height = 1;
+        textComponent->real_width = width;
+        textComponent->x = 0;
+        textComponent->y = localRow;
+        textComponent->text_properties.textColor = component->settings_properties.colors[3];
+        textComponent->text_properties.bgColor = component->settings_properties.colors[2];
+        drawTextComponent(textComponent);
+        break;
+      default:
+        break;
+    }
+    currentRowElement = currentRowElement->nextElement;
+    localRow++;
+  }
+
 }
 
 void drawUI() {
@@ -3029,6 +3204,7 @@ Component *newContainer() {
   cont->onKeyPress = handleDefaultInput;
   cont->actionHint = NULL;
   cont->modeHint = NULL;
+  cont->isVisible = 1;
 
   return cont;
 }
@@ -3142,6 +3318,48 @@ TreeViewElement *newTreeViewElement(TreeViewElement *parent, int isChild) {
   addStringToTable("+", &(elem->texts));
 
   return elem;
+}
+
+/*Creates a new Settings component*/
+Component * newSettingsComponent() {
+  Component *cmp = newContainer();
+  cmp->component_type = settings_t;
+  cmp->settings_properties.nColors = 8;
+  cmp->settings_properties.colors = malloc(sizeof(Color) * 8);
+  cmp->settings_properties.colors[0] = BG_COLOR_HIGHLIGHT;
+  cmp->settings_properties.colors[1] = FONT_COLOR_HIGHLIGHT;
+  cmp->settings_properties.colors[2] = BG_2_COLOR;
+  cmp->settings_properties.colors[3] = FONT_2_COLOR;
+  cmp->settings_properties.colors[4] = BG_COLOR;
+  cmp->settings_properties.colors[5] = FONT_2_COLOR;
+  cmp->settings_properties.colors[6] = BG_2_COLOR;
+  cmp->settings_properties.colors[7] = FONT_2_COLOR;
+  cmp->settings_properties.currentFocus = 0;
+
+  cmp->settings_properties.child = NULL;
+  cmp->border = 0;
+  cmp->isUpdated = 3;
+
+  return cmp;
+}
+SettingsElement * newSettingsElement(SettingsElement * prevElement, SettingsElement * nextElement){
+  SettingsElement * element = malloc(sizeof(SettingsElement));
+  if (prevElement != NULL){
+    element->previousElement = prevElement;
+    element->previousElement->nextElement = element;
+  }
+  if (nextElement != NULL){
+    element->nextElement = nextElement;
+    element->nextElement->previousElement = element;
+  }
+  return element;
+}
+
+SettingsElement * newSettingsTitleElement(SettingsElement * prevElement, SettingsElement * nextElement, char * content){
+  SettingsElement * element = newSettingsElement(prevElement, nextElement);
+  element->fieldType = title_s;
+  element->title_data.value = content;
+  return element;
 }
 
 /*Creates new color based on an Hex string*/
