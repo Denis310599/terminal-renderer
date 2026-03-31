@@ -123,7 +123,9 @@ typedef struct Settings{
   Color *colors; // bg-fg hover, title, setting, 
   SettingsElement * child;
   SettingsElement * focusElement;
+  int focusElementIndex;
   int offset;
+  void (*fieldUpdated)(int position, SettingsElement * settingElement); //Position of the setting item row
 } Settings;
 
 typedef struct ObjectManagerData{
@@ -267,6 +269,7 @@ int handleDefaultInput(Component * cmp, char keypress);
 void handleInputNoFocus(char keypress);
 int handleTreeViewInput(Component *component, char keypress);
 int handleSettingInput(Component *component, char keypress);
+void handleObjectPropertiesUpdate(int position, SettingsElement * settingElement);
 void closeProgram();
 
 void enable_raw_mode();
@@ -293,7 +296,7 @@ void createAxis();
 int handleObjectManajerKeyPress(Component *component, char keypress);
 void handleSelectedObjectAction(char keypress, float scaler);
 int handleViewportInput(Component * component, char keypress);
-void calculateCommandHintObjectManager();
+void calculateHintsObjectManager();
 void calculateCommnandHintViewport();
 
 /*Color deffinitions*/
@@ -317,6 +320,7 @@ ComponentTable cmpsToUpdate;
 Component *viewport;
 Component * objectManagerComponent;
 Component * objectTreeView = NULL;
+Component * objectPropertiesComponent = NULL;
 TreeViewElement * selectedTreeElem = NULL;
 Object * selectedObject = NULL;
 Component * actionHintsComponent;
@@ -333,6 +337,10 @@ int handleObjectPropertiesKeyPress(Component * component, char keypress){
   switch(keypress){
   }
   int returnValue = handleSettingInput(component, keypress);
+  
+  //Calculates the command hint
+  calculateHintsObjectManager();
+
   return returnValue;
 }
 int handleObjectManajerKeyPress(Component *component, char keypress) {
@@ -386,6 +394,46 @@ int handleObjectManajerKeyPress(Component *component, char keypress) {
   // component->children[component->tabview_properties.selectedTab]->isUpdated =
   // 1;
 }
+
+void handleObjectPropertiesUpdate(int position, SettingsElement * settingElement){
+  int updated = 1;
+  // Update the object field associated to the updated setting field
+  switch(position){
+    case 2:
+      selectedObject->pos.x = settingElement->number_data.float_value;
+      break;
+    case 3:
+      selectedObject->pos.y = settingElement->number_data.float_value;
+      break;
+    case 4:
+      selectedObject->pos.z = settingElement->number_data.float_value;
+      break;
+    case 6:
+      selectedObject->scale.x = settingElement->number_data.float_value;
+      break;
+    case 7:
+      selectedObject->scale.y = settingElement->number_data.float_value;
+      break;
+    case 8:
+      selectedObject->scale.z = settingElement->number_data.float_value;
+      break;
+    case 10:
+      selectedObject->rot.x = settingElement->number_data.float_value;
+      break;
+    case 11:
+      selectedObject->rot.y = settingElement->number_data.float_value;
+      break;
+    case 12:
+      selectedObject->rot.z = settingElement->number_data.float_value;
+      break;
+    default:
+      updated = 0;
+  }
+
+  // Redraw viewport
+  if (updated) updateComponent(viewport, 0);
+}
+
 
 /*Function that handles the tree view of the object manager*/
 int handleTreeViewInput(Component *component, char keypress) {
@@ -537,13 +585,53 @@ int handleTreeViewInput(Component *component, char keypress) {
       updateComponent(viewport, 0);
       selectedObject = NULL;
       commandHintComponent->text_properties.content = "\0";
+      break;
       return 1;
     case '\n':
       component->isVisible = 0;
       component->parent->children[1]->isVisible = 1;
+      calculateHintsObjectManager();
       updateComponent(component->parent, 0);
       component->parent->children[1]->settings_properties.focusElement = NULL;
       component->parent->children[1]->settings_properties.child->title = selectedTreeElem->texts.table[2];
+
+      //Update the properties view
+      SettingsElement * currentElement = objectPropertiesComponent->settings_properties.child;
+      int row = 0;
+      while(currentElement != NULL){
+        switch(row){
+          case 2:
+            currentElement->number_data.float_value = selectedObject->pos.x;
+            break;
+          case 3:
+            currentElement->number_data.float_value = selectedObject->pos.y;
+            break;
+          case 4:
+            currentElement->number_data.float_value = selectedObject->pos.z;
+            break;
+          case 6:
+            currentElement->number_data.float_value = selectedObject->scale.x;
+            break;
+          case 7:
+            currentElement->number_data.float_value = selectedObject->scale.y;
+            break;
+          case 8:
+            currentElement->number_data.float_value = selectedObject->scale.z;
+            break;
+          case 10:
+            currentElement->number_data.float_value = selectedObject->rot.x;
+            break;
+          case 11:
+            currentElement->number_data.float_value = selectedObject->rot.y;
+            break;
+          case 12:
+            currentElement->number_data.float_value = selectedObject->rot.z;
+            break;
+        }
+        currentElement = currentElement->nextElement;
+        row++;
+      }
+      break;
     default:
       inputHandled = 0;
     }
@@ -571,25 +659,8 @@ int handleTreeViewInput(Component *component, char keypress) {
     selectedObject = (Object *) selectedTreeElem->data;
   }
 
-  //Calculates the command hint
-  calculateCommandHintObjectManager();
-
-  //Update the text label on the actions hint
-  char * actionHint = malloc(sizeof(char) * 1000);
-  actionHint[0] = '\0';
-
-  if (objectManagerData->global == 1){
-    sprintf(actionHint, "g) Disable global mode   ");
-  }else{
-    sprintf(actionHint, "g) Enable global mode   ");
-  }
-
-  sprintf(actionHint, "%shjkl) Navigate tree view   ", actionHint);
-
-  if (objectManagerData->movementMode != 3){
-    sprintf(actionHint, "%s   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis", actionHint);
-  }
-  component->actionHint = actionHint;
+  //Calculates the command hints
+  calculateHintsObjectManager();
 
   // component->isUpdated = 1;
   if (updateThisCMP) updateComponent(component, 0);
@@ -597,22 +668,60 @@ int handleTreeViewInput(Component *component, char keypress) {
   return inputHandled;
 }
 
-void calculateCommandHintObjectManager(){
+void calculateHintsObjectManager(){
   //Update the text label on the command status
-  char * commandHint = malloc(sizeof(char) * 100);
-  switch (objectManagerData->movementMode){
-    case (1):
-      sprintf(commandHint, "Translating");
-      break;
-    case (2):
-      sprintf(commandHint, "Rotating");
-      break;
-    case (3):
-      sprintf(commandHint, "Scaling");
-      break;
+  if (objectTreeView->isVisible == 1){
+    char * commandHint = malloc(sizeof(char) * 100);
+    switch (objectManagerData->movementMode){
+      case (1):
+        sprintf(commandHint, "Translating");
+        break;
+      case (2):
+        sprintf(commandHint, "Rotating");
+        break;
+      case (3):
+        sprintf(commandHint, "Scaling");
+        break;
+    }
+    sprintf(commandHint, "%s - x%.2f", commandHint, objectManagerData->scaler);
+    commandHintComponent->text_properties.content = commandHint;
+
+    //Update the text label on the actions hint
+    char * actionHint = malloc(sizeof(char) * 1000);
+    actionHint[0] = '\0';
+
+    if (objectManagerData->global == 1){
+      sprintf(actionHint, "g) Disable global mode   ");
+    }else{
+      sprintf(actionHint, "g) Enable global mode   ");
+    }
+
+    sprintf(actionHint, "%shjkl) Navigate tree view   ", actionHint);
+
+    if (objectManagerData->movementMode != 3){
+      sprintf(actionHint, "%s   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis", actionHint);
+    }
+    objectTreeView->actionHint = actionHint;
+    objectPropertiesComponent->actionHint = "";
+  }else{
+    objectTreeView->actionHint = "";
+    if (objectPropertiesComponent->settings_properties.editing == 0){
+      commandHintComponent->text_properties.content = "";
+      objectPropertiesComponent->actionHint = "jk) Navigate component   \u21B5) Modify value   ESC) Exit object properties";
+    }else if(objectPropertiesComponent->settings_properties.focusElement != NULL){
+      switch(objectPropertiesComponent->settings_properties.focusElement->fieldType){
+        case number_s:
+          objectPropertiesComponent->actionHint = "hl) Moving   jk) Change number   ESC) Exit edition";
+          commandHintComponent->text_properties.content = "Editing Number";
+          break;
+        default:
+          commandHintComponent->text_properties.content = "";
+          objectPropertiesComponent->actionHint = "";
+          break;
+      }
+    }
+
   }
-  sprintf(commandHint, "%s - x%.2f", commandHint, objectManagerData->scaler);
-  commandHintComponent->text_properties.content = commandHint;
 }
 
 void calculateCommandHintViewport(){
@@ -807,7 +916,7 @@ void handleInputNoFocus(char keypress){
         selectedTreeElem = objectManagerData->lastSelectedElement;
         objectTreeView->treeview_properties.selectedElement = selectedTreeElem;
       }
-      calculateCommandHintObjectManager();
+      calculateHintsObjectManager();
       updateComponent(viewport, 0);
       updateComponent(objectManagerComponent, 0);
       break;
@@ -971,6 +1080,9 @@ int handleSettingInput(Component *component, char keypress) {
           default:
             break;
         }
+        if (component->settings_properties.fieldUpdated != NULL){
+          component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
+        }
         break;
       case 'k':
         //Up pressed
@@ -996,6 +1108,9 @@ int handleSettingInput(Component *component, char keypress) {
             }
           default:
             break;
+        }
+        if (component->settings_properties.fieldUpdated != NULL){
+          component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
         }
         break;
       case 'l':
@@ -1038,29 +1153,33 @@ int handleSettingInput(Component *component, char keypress) {
     }
   }else{
     SettingsElement * nextSettingElement = settings->focusElement;
+    int offset = 0;
     switch(keypress){
       case 'j':
         //Go down
         while(nextSettingElement != NULL){
           nextSettingElement = nextSettingElement->nextElement;
-          if (nextSettingElement->fieldType != title_s) break;
+          offset++;
+          if (nextSettingElement != NULL && nextSettingElement->fieldType != title_s){
+            settings->focusElement = nextSettingElement;
+            settings->focusElementIndex += offset;
+            break;
+          }
         }
-
-        settings->focusElement = ( nextSettingElement != NULL && nextSettingElement->fieldType != title_s) ?
-          nextSettingElement :
-          settings->focusElement;
 
         break;
       case 'k':
         //Go up
         while(nextSettingElement != NULL ){
           nextSettingElement = nextSettingElement->previousElement;
-          if (nextSettingElement->fieldType != title_s) break;
+          offset++;
+          if (nextSettingElement != NULL && nextSettingElement->fieldType != title_s){
+            settings->focusElement = nextSettingElement;
+            settings->focusElementIndex -= offset;
+            break;
+          }
         }
 
-        settings->focusElement = ( nextSettingElement != NULL && nextSettingElement->fieldType != title_s) ?
-          nextSettingElement :
-          settings->focusElement;
         break;
       case '\n':
         //Enter pressed
@@ -1444,6 +1563,7 @@ void initUI() {
   objectPropertiesCmp->startToStartOf = tabView->children[0];
   objectPropertiesCmp->endToEndOf = tabView->children[0];
   objectPropertiesCmp->parent = tabView->children[0];
+  objectPropertiesComponent = objectPropertiesCmp;
 
   objectPropertiesCmp->autoHeight = 2;
   objectPropertiesCmp->autoWidth = 2;
@@ -1452,10 +1572,19 @@ void initUI() {
   objectPropertiesCmp->onKeyPress = handleObjectPropertiesKeyPress;
 
   objectPropertiesCmp->settings_properties.child = newSettingsTitleElement("Title test", NULL, NULL);
+  objectPropertiesCmp->settings_properties.fieldUpdated = handleObjectPropertiesUpdate;
   SettingsElement * settingElement = newSettingsTitleElement("Position", objectPropertiesCmp->settings_properties.child, NULL);
   settingElement = newSettingsNumberInput("x", 1, settingElement, NULL);
   settingElement = newSettingsNumberInput("y", 1, settingElement, NULL);
-  settingElement = newSettingsNumberInput("z", 0, settingElement, NULL);
+  settingElement = newSettingsNumberInput("z", 1, settingElement, NULL);
+  settingElement = newSettingsTitleElement("Scale", settingElement, NULL);
+  settingElement = newSettingsNumberInput("x", 1, settingElement, NULL);
+  settingElement = newSettingsNumberInput("y", 1, settingElement, NULL);
+  settingElement = newSettingsNumberInput("z", 1, settingElement, NULL);
+  settingElement = newSettingsTitleElement("Rotation", settingElement, NULL);
+  settingElement = newSettingsNumberInput("x", 1, settingElement, NULL);
+  settingElement = newSettingsNumberInput("y", 1, settingElement, NULL);
+  settingElement = newSettingsNumberInput("z", 1, settingElement, NULL);
   /*
   TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
   treeView->treeview_properties.child = treeViewElem;
@@ -2551,6 +2680,7 @@ void drawSettingsComponent(Component *component) {
     if (component->settings_properties.focusElement == NULL &&
         currentRowElement->fieldType != title_s){
       component->settings_properties.focusElement = currentRowElement;
+      component->settings_properties.focusElementIndex = localRow;
     }
     //Render each settings component
     //Create a text element with the width of the component
@@ -2790,7 +2920,9 @@ int calculateHintMessages(Component * component, StringTable * modeHint, StringT
     modeHints = newStringTable("");
     for(int i = 0; i < parentComponent.childCount; i++){
       //TODO: Memory leak here, must free the memory whenever the tables are no longer used
-      calculateHintMessages(parentComponent.children[i], &modeHints, &actionHints, 0);
+      if (parentComponent.children[i]->isVisible == 1){
+        calculateHintMessages(parentComponent.children[i], &modeHints, &actionHints, 0);
+      }
     }
 
     //Built the final string
@@ -2858,8 +2990,8 @@ int calculateHintMessages(Component * component, StringTable * modeHint, StringT
 
     if (alreadyFoundAux == 1){
       // Add string if already found 
-      if (component->modeHint != NULL) addStringToTable(component->modeHint, modeHint);
-      if (component->actionHint != NULL) addStringToTable(component->actionHint, actionHint);
+      if (component->modeHint != NULL && strcmp(component->modeHint, "") != 0) addStringToTable(component->modeHint, modeHint);
+      if (component->actionHint != NULL && strcmp(component->actionHint, "") != 0) addStringToTable(component->actionHint, actionHint);
       return 1;
     }
     
@@ -3615,6 +3747,8 @@ Component * newSettingsComponent() {
   cmp->settings_properties.colors[7] = FONT_2_COLOR;
   cmp->settings_properties.focusElement = NULL;
   cmp->settings_properties.offset = 0;
+  cmp->settings_properties.focusElementIndex = 0;
+  cmp->settings_properties.fieldUpdated = NULL;
 
   cmp->settings_properties.child = NULL;
   cmp->border = 0;
