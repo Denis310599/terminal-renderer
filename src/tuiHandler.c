@@ -1,5 +1,7 @@
 #include <asm-generic/ioctls.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <math.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -91,10 +93,6 @@ typedef struct TreeView {
 
 enum SettingFieldType { title_s, number_s, text_s, list_s, check_s};
 
-typedef struct TitleSetting{
-  char * value;
-  void * textComponent;
-} TitleSetting;
 
 typedef struct NumberSetting{
   int float_type; // 0 int, 1 float
@@ -103,6 +101,8 @@ typedef struct NumberSetting{
     int int_value;
   };
   float multiplyer;
+  int width;
+  int float_precision;
 } NumberSetting;
 
 
@@ -111,17 +111,19 @@ typedef struct SettingsElement {
   struct SettingsElement *nextElement;
   enum SettingFieldType fieldType;
   union{
-    TitleSetting title_data;
     NumberSetting number_data;
   };
+  char * title;
+  void * textComponent;
 } SettingsElement;
 
 typedef struct Settings{
-  int currentFocus;
   int editing;
   int nColors;
-  Color *colors; // bg-fg hover, idle alternating...
+  Color *colors; // bg-fg hover, title, setting, 
   SettingsElement * child;
+  SettingsElement * focusElement;
+  int offset;
 } Settings;
 
 typedef struct ObjectManagerData{
@@ -255,13 +257,16 @@ Component *newTextComponent(char *text);
 TreeViewElement *newTreeViewElement(TreeViewElement *parent, int isChild);
 Component *newTreeViewComponent();
 Component * newSettingsComponent();
-SettingsElement * newSettingsElement(SettingsElement * prevElement, SettingsElement * nextElement);
-SettingsElement * newSettingsTitleElement(SettingsElement * prevElement, SettingsElement * nextElement, char * content);
+SettingsElement * newSettingsElement(char * title, SettingsElement * prevElement, SettingsElement * nextElement);
+SettingsElement * newSettingsTitleElement(char * content, SettingsElement * prevElement, SettingsElement * nextElement);
+SettingsElement * newSettingsNumberInput(char * title, int isFloat, SettingsElement * prevElement, SettingsElement * nextElement);
 Color *newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
 int handleDefaultInput(Component * cmp, char keypress);
 void handleInputNoFocus(char keypress);
+int handleTreeViewInput(Component *component, char keypress);
+int handleSettingInput(Component *component, char keypress);
 void closeProgram();
 
 void enable_raw_mode();
@@ -326,12 +331,9 @@ int handleObjectPropertiesKeyPress(Component * component, char keypress){
     return 0;
   }
   switch(keypress){
-    case 27:
-        component->isVisible = 0;
-        component->parent->children[0]->isVisible = 1;
-        updateComponent(component->parent, 0);
   }
-  return 1;
+  int returnValue = handleSettingInput(component, keypress);
+  return returnValue;
 }
 int handleObjectManajerKeyPress(Component *component, char keypress) {
   debug("Handling keypress in ObjectManager");
@@ -501,9 +503,11 @@ int handleTreeViewInput(Component *component, char keypress) {
       break;
     case '+':
       objectManagerData->scaler *= 10;
+      updateComponent(component, 0);
       break;
     case '-':
       objectManagerData->scaler *= 0.1;
+      updateComponent(component, 0);
       break;
     case 'g':
       objectManagerData->global = !objectManagerData->global;
@@ -530,6 +534,7 @@ int handleTreeViewInput(Component *component, char keypress) {
       focusComponent = NULL;
       component->treeview_properties.selectedElement = NULL;
       updateComponent(component, 0);
+      updateComponent(viewport, 0);
       selectedObject = NULL;
       commandHintComponent->text_properties.content = "\0";
       return 1;
@@ -537,6 +542,8 @@ int handleTreeViewInput(Component *component, char keypress) {
       component->isVisible = 0;
       component->parent->children[1]->isVisible = 1;
       updateComponent(component->parent, 0);
+      component->parent->children[1]->settings_properties.focusElement = NULL;
+      component->parent->children[1]->settings_properties.child->title = selectedTreeElem->texts.table[2];
     default:
       inputHandled = 0;
     }
@@ -801,6 +808,7 @@ void handleInputNoFocus(char keypress){
         objectTreeView->treeview_properties.selectedElement = selectedTreeElem;
       }
       calculateCommandHintObjectManager();
+      updateComponent(viewport, 0);
       updateComponent(objectManagerComponent, 0);
       break;
   }
@@ -926,6 +934,162 @@ int handleViewportInput(Component * component, char keypress){
   return inputHandled;
 }
 
+int handleSettingInput(Component *component, char keypress) {
+  debug("Handling keypress on settings input: %c", keypress);
+  Settings * settings = &component->settings_properties;
+  if (settings->focusElement == NULL){
+    return 1;
+  }
+  if (settings->editing == 1){
+    switch(keypress){
+      case 27:
+        //Exit focused input
+        settings->editing = 0;
+        break;
+      case 'j':
+        // Down pressed
+        switch(settings->focusElement->fieldType){
+          case number_s:
+            //Decrease the input number
+            if (settings->focusElement->number_data.float_type == 0){
+              if (settings->focusElement->number_data.int_value > 0 ||
+                  (settings->focusElement->number_data.multiplyer < 
+                  (settings->focusElement->number_data.int_value - (INT_MIN+1)))){
+                settings->focusElement->number_data.int_value -= (int) settings->focusElement->number_data.multiplyer;
+              }else{
+                settings->focusElement->number_data.int_value = INT_MIN+1;
+              }
+            }else{
+            if (settings->focusElement->number_data.float_value > 0 ||
+                (settings->focusElement->number_data.multiplyer < 
+                  (settings->focusElement->number_data.float_value - INT_MIN))){
+                settings->focusElement->number_data.float_value -= settings->focusElement->number_data.multiplyer;
+              }else{
+                settings->focusElement->number_data.float_value = INT_MIN+1.0f;
+              }
+            }
+          default:
+            break;
+        }
+        break;
+      case 'k':
+        //Up pressed
+        switch(settings->focusElement->fieldType){
+          case number_s:
+            //Increase the input number
+            if (settings->focusElement->number_data.float_type == 0){
+              if (settings->focusElement->number_data.int_value < 0 ||
+                  (settings->focusElement->number_data.multiplyer < 
+                  (INT_MAX - settings->focusElement->number_data.int_value))){
+                settings->focusElement->number_data.int_value += (int) settings->focusElement->number_data.multiplyer;
+              }else{
+                settings->focusElement->number_data.int_value = INT_MAX-1;
+              }
+            }else{
+              if (settings->focusElement->number_data.float_type < 0 ||
+                  (settings->focusElement->number_data.multiplyer < 
+                  (INT_MAX - settings->focusElement->number_data.float_value))){
+                settings->focusElement->number_data.float_value += settings->focusElement->number_data.multiplyer;
+              }else{
+                settings->focusElement->number_data.float_value = INT_MAX-1.0f;
+              }
+            }
+          default:
+            break;
+        }
+        break;
+      case 'l':
+        //Up pressed
+        switch(settings->focusElement->fieldType){
+          case number_s:
+            if (settings->focusElement->number_data.float_type == 0){
+              if (settings->focusElement->number_data.multiplyer > 2) settings->focusElement->number_data.multiplyer /= 10;
+            }else{
+              //TODO: Fix the Multiplyer going wild
+              float inputNumber = settings->focusElement->number_data.multiplyer;
+              inputNumber = inputNumber < 0 ? -inputNumber : inputNumber;
+              if (inputNumber > 0.00001f) settings->focusElement->number_data.multiplyer /= 10.0f;
+              settings->focusElement->number_data.multiplyer = powf(10.0f, roundf(log10f(settings->focusElement->number_data.multiplyer)));
+            }
+          default:
+            break;
+        }
+        break;
+      case 'h':
+        //Up pressed
+        switch(settings->focusElement->fieldType){
+          case number_s:
+            if (settings->focusElement->number_data.multiplyer <= (INT_MAX * 0.15)){
+              settings->focusElement->number_data.multiplyer *= 10.0f;
+            }
+            settings->focusElement->number_data.multiplyer = powf(10.0f, roundf(log10f(settings->focusElement->number_data.multiplyer)));
+          default:
+            break;
+        }
+        break;
+      default:
+        return 0;
+    }
+    debug("New multiplyer %f", settings->focusElement->number_data.multiplyer);
+    if (settings->focusElement->number_data.float_type == 0){
+      debug("New Value %d", settings->focusElement->number_data.int_value);
+    }else{
+      debug("New Value %f", settings->focusElement->number_data.float_value);
+    }
+  }else{
+    SettingsElement * nextSettingElement = settings->focusElement;
+    switch(keypress){
+      case 'j':
+        //Go down
+        while(nextSettingElement != NULL){
+          nextSettingElement = nextSettingElement->nextElement;
+          if (nextSettingElement->fieldType != title_s) break;
+        }
+
+        settings->focusElement = ( nextSettingElement != NULL && nextSettingElement->fieldType != title_s) ?
+          nextSettingElement :
+          settings->focusElement;
+
+        break;
+      case 'k':
+        //Go up
+        while(nextSettingElement != NULL ){
+          nextSettingElement = nextSettingElement->previousElement;
+          if (nextSettingElement->fieldType != title_s) break;
+        }
+
+        settings->focusElement = ( nextSettingElement != NULL && nextSettingElement->fieldType != title_s) ?
+          nextSettingElement :
+          settings->focusElement;
+        break;
+      case '\n':
+        //Enter pressed
+        if (settings->focusElement->fieldType != title_s){
+          settings->editing = 1;
+          switch(settings->focusElement->fieldType){
+            case number_s:
+              settings->focusElement->number_data.multiplyer = 1;
+              break;
+            default:
+              break;
+          }
+        }
+        break;
+      case 27:
+        //Exit component
+        component->isVisible = 0;
+        component->parent->children[0]->isVisible = 1;
+        updateComponent(component->parent, 0);
+        return 1;
+      default:
+        return 0;
+    }
+  }
+  updateComponent(component, 0);
+
+  return 1;
+
+}
 /*Function that imports a new object to the scene
  * uri: path to the object
  * format: 0 stl*/
@@ -1287,8 +1451,11 @@ void initUI() {
   objectPropertiesCmp->border = 0;
   objectPropertiesCmp->onKeyPress = handleObjectPropertiesKeyPress;
 
-  objectPropertiesCmp->settings_properties.child = newSettingsTitleElement(NULL, NULL, "Title test");
-  newSettingsTitleElement(objectPropertiesCmp->settings_properties.child, NULL, "Title test 2");
+  objectPropertiesCmp->settings_properties.child = newSettingsTitleElement("Title test", NULL, NULL);
+  SettingsElement * settingElement = newSettingsTitleElement("Position", objectPropertiesCmp->settings_properties.child, NULL);
+  settingElement = newSettingsNumberInput("x", 1, settingElement, NULL);
+  settingElement = newSettingsNumberInput("y", 1, settingElement, NULL);
+  settingElement = newSettingsNumberInput("z", 0, settingElement, NULL);
   /*
   TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
   treeView->treeview_properties.child = treeViewElem;
@@ -2380,39 +2547,151 @@ void drawSettingsComponent(Component *component) {
   int height = component->real_height;
   //Iterate over every settings component
   while (currentRowElement != NULL){
+    //Check if this needs to be the selected one
+    if (component->settings_properties.focusElement == NULL &&
+        currentRowElement->fieldType != title_s){
+      component->settings_properties.focusElement = currentRowElement;
+    }
     //Render each settings component
+    //Create a text element with the width of the component
+    Component * textComponent = currentRowElement->textComponent;
+
+    int text_len = strlen(currentRowElement->title);
+    
+    //Fill the remaining space with blank spaces
+    char * text = malloc(sizeof(char) * (width));
+    memset(text, ' ', width);
+    text[width] = '\0';
+    sprintf(text, "%s", currentRowElement->title);
+    text[text_len] = ' ';
+    if (textComponent == NULL){
+      textComponent = newTextComponent(text);
+      textComponent->parent = component;
+    }else{
+      if(textComponent->text_properties.content != NULL){
+        free(textComponent->text_properties.content);
+      }
+      textComponent->text_properties.content = text;
+    }
+
+    textComponent->real_height = 1;
+    textComponent->real_width = width;
+    textComponent->x = 0;
+    textComponent->y = localRow;
+    textComponent->text_properties.textColor = component->settings_properties.colors[3];
+    textComponent->text_properties.bgColor = component->settings_properties.colors[2];
+    if (currentRowElement == component->settings_properties.focusElement && component->settings_properties.editing == 0){
+      textComponent->text_properties.textColor = component->settings_properties.colors[1];
+      textComponent->text_properties.bgColor = component->settings_properties.colors[0];
+    }
+    drawTextComponent(textComponent);
+
+    //Draw the input widget
     switch (currentRowElement->fieldType) {
       case title_s:
-        //Title component
-        //Create a text element with the width of the component
-        Component * textComponent = currentRowElement->title_data.textComponent;
+        //Title component has nothing else
+        break;
+      case number_s:
+        //Number input
+        //Draws at the end of the title
+        int start = strlen(currentRowElement->title)+1+globalX;
+        int end = start + currentRowElement->number_data.width;
+        if (end > (component->global_x + component->real_width)){
+          end = component->global_x + component->real_width;
+        }
+        int realInputWidth = end - start;
+        float multiplier = currentRowElement->number_data.multiplyer;
 
-        int text_len = strlen(currentRowElement->title_data.value);
-        
-        //Fill the remaining space with blank spaces
-        char * text = malloc(sizeof(char) * (width));
-        memset(text, ' ', width);
-        text[width] = '\0';
-        sprintf(text, "%s", currentRowElement->title_data.value);
-        text[text_len] = ' ';
-        if (textComponent == NULL){
-          textComponent = newTextComponent(text);
-          textComponent->parent = component;
-        }else{
-          if(textComponent->text_properties.content != NULL){
-            free(textComponent->text_properties.content);
+        //Calculate the final string to print
+        char * finalStringBufffer = malloc(sizeof(char)*100);
+        char * numberStrBuffer = malloc(sizeof(char)*100);
+        char * blankSpacesBuffer = malloc(sizeof(char)*100);
+
+        int maxNumberStringBufferPos = 0;
+        int minNumberStringBufferPos = 0;
+        int multiplyerPos = floorf(log10f(multiplier));
+        int editing = 0;
+        int isNegative = 0;
+        if (component->settings_properties.focusElement == currentRowElement &&
+              component->settings_properties.editing == 1){
+          editing = 1;
+        }
+        if (currentRowElement->number_data.float_type == 0){
+          //calculate the size of the number
+          int inputNumber = currentRowElement->number_data.int_value;
+          if (inputNumber < 0) isNegative = 1;
+          int maxNumberPos = floorf(log10f(abs(inputNumber)));
+          if (inputNumber == 0) maxNumberPos = 0;
+          if (editing == 0) multiplyerPos = maxNumberPos;
+          maxNumberStringBufferPos = maxNumberPos > multiplyerPos ?  maxNumberPos : multiplyerPos;
+
+          if (maxNumberPos >= multiplyerPos){
+            blankSpacesBuffer[0] = '\0';
+          }else{
+            memset(blankSpacesBuffer, ' ', multiplyerPos-maxNumberPos);
+            blankSpacesBuffer[multiplyerPos-maxNumberPos] = '\0';
           }
-          textComponent->text_properties.content = text;
+          sprintf(numberStrBuffer, "%s%d", blankSpacesBuffer, inputNumber);
+        }else{
+          //calculate the size of the number
+          float inputNumber = currentRowElement->number_data.float_value;
+          float positiveNumber = currentRowElement->number_data.float_value < 0.0f ? -inputNumber : inputNumber;
+          if (inputNumber < 0.0f) isNegative = 1;
+          int maxNumberPos = floorf(log10f(positiveNumber));
+          if (positiveNumber < 1.0f) maxNumberPos = 0;
+          if (inputNumber == 0.0f) maxNumberPos = 0;
+          if (editing == 0) multiplyerPos = maxNumberPos;
+          else if(multiplyerPos<0) multiplyerPos -= 1;
+          maxNumberStringBufferPos = maxNumberPos > multiplyerPos ?  maxNumberPos : multiplyerPos;
+
+          if (maxNumberPos >= multiplyerPos){
+            blankSpacesBuffer[0] = '\0';
+          }else{
+            memset(blankSpacesBuffer, ' ', multiplyerPos-maxNumberPos);
+            blankSpacesBuffer[multiplyerPos-maxNumberPos] = '\0';
+          }
+          sprintf(numberStrBuffer, "%s%.5f", blankSpacesBuffer, inputNumber);
         }
 
-        textComponent->real_height = 1;
-        textComponent->real_width = width;
-        textComponent->x = 0;
-        textComponent->y = localRow;
-        textComponent->text_properties.textColor = component->settings_properties.colors[3];
-        textComponent->text_properties.bgColor = component->settings_properties.colors[2];
-        drawTextComponent(textComponent);
-        break;
+        //Slice the final string to fit in the input
+        int idealStartPos = multiplyerPos + realInputWidth-1;
+        int numberStrBufferLen = strlen(numberStrBuffer);
+        int numberStrStartPos = idealStartPos < maxNumberStringBufferPos ? idealStartPos : maxNumberStringBufferPos;
+        int numberStrStartIndex = - numberStrStartPos + maxNumberStringBufferPos;
+
+
+        for (int i = 0; i<realInputWidth; i++){
+          if (i>=(numberStrBufferLen-numberStrStartIndex)){
+            finalStringBufffer[i] = ' ';
+          }else{
+            finalStringBufffer[i] = numberStrBuffer[numberStrStartIndex + i];
+          }
+        }
+        finalStringBufffer[realInputWidth] = '\0';
+        printText(start+1,
+            globalY + localRow+1,
+            finalStringBufffer,
+            component->settings_properties.colors[4], 
+            component->settings_properties.colors[5]
+            );
+
+        if (editing){
+          //Hihglight the multiplyer
+          char * hightlightChar = malloc(sizeof(char)*2);
+          sprintf(hightlightChar, "%c", numberStrBuffer[-multiplyerPos + maxNumberStringBufferPos+isNegative]);
+          printText(start+isNegative+1+(numberStrStartPos-multiplyerPos),
+              globalY + localRow+1,
+              hightlightChar,
+              component->settings_properties.colors[0], 
+              component->settings_properties.colors[1]
+              );
+          free(hightlightChar);
+        }
+        free(numberStrBuffer);
+        free(blankSpacesBuffer);
+        free(finalStringBufffer);
+
+
       default:
         break;
     }
@@ -3334,15 +3613,17 @@ Component * newSettingsComponent() {
   cmp->settings_properties.colors[5] = FONT_2_COLOR;
   cmp->settings_properties.colors[6] = BG_2_COLOR;
   cmp->settings_properties.colors[7] = FONT_2_COLOR;
-  cmp->settings_properties.currentFocus = 0;
+  cmp->settings_properties.focusElement = NULL;
+  cmp->settings_properties.offset = 0;
 
   cmp->settings_properties.child = NULL;
   cmp->border = 0;
   cmp->isUpdated = 3;
 
+
   return cmp;
 }
-SettingsElement * newSettingsElement(SettingsElement * prevElement, SettingsElement * nextElement){
+SettingsElement * newSettingsElement(char * title, SettingsElement * prevElement, SettingsElement * nextElement){
   SettingsElement * element = malloc(sizeof(SettingsElement));
   if (prevElement != NULL){
     element->previousElement = prevElement;
@@ -3352,13 +3633,26 @@ SettingsElement * newSettingsElement(SettingsElement * prevElement, SettingsElem
     element->nextElement = nextElement;
     element->nextElement->previousElement = element;
   }
+  element->title = title;
   return element;
 }
 
-SettingsElement * newSettingsTitleElement(SettingsElement * prevElement, SettingsElement * nextElement, char * content){
-  SettingsElement * element = newSettingsElement(prevElement, nextElement);
+SettingsElement * newSettingsTitleElement(char * content, SettingsElement * prevElement, SettingsElement * nextElement){
+  SettingsElement * element = newSettingsElement(content, prevElement, nextElement);
   element->fieldType = title_s;
-  element->title_data.value = content;
+  return element;
+}
+
+SettingsElement * newSettingsNumberInput(char * title, int isFloat, SettingsElement * prevElement, SettingsElement * nextElement){
+  SettingsElement * element = newSettingsElement(title, prevElement, nextElement);
+  element->fieldType = number_s;
+  element->number_data.float_type = isFloat;
+  element->number_data.multiplyer = 1;
+  element->number_data.width = 8;
+  element->number_data.float_precision = 5;
+  if (isFloat) element->number_data.float_value = 0.0f;
+  else element->number_data.int_value = 0;
+
   return element;
 }
 
