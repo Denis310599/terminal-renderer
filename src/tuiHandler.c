@@ -269,6 +269,7 @@ int handleDefaultInput(Component * cmp, char keypress);
 void handleInputNoFocus(char keypress);
 int handleTreeViewInput(Component *component, char keypress);
 int handleSettingInput(Component *component, char keypress);
+int handleSettingsNumberFieldKeypress(Component * component, char keypress);
 void handleObjectPropertiesUpdate(int position, SettingsElement * settingElement);
 void closeProgram();
 
@@ -352,32 +353,36 @@ int handleObjectManajerKeyPress(Component *component, char keypress) {
   } 
   int updateThisCMP = 0;
   Component * selectedCmp;
-  switch (keypress) {
-  case '3':
-    component->tabview_properties.selectedTab ==
-            (component->tabview_properties.tabCount - 1)
-        ?: component->tabview_properties.selectedTab++;
-    component->tabview_properties.snapTab = 1;
-    updateThisCMP = 1;
-    break;
-  case '1':
-    component->tabview_properties.selectedTab == 0
-        ?: component->tabview_properties.selectedTab--;
-    component->tabview_properties.snapTab = 1;
-    updateThisCMP = 1;
-    break;
+  // Pass to the component controller
+  if (component->tabview_properties.selectedTab < component->childCount &&
+      component->children[component->tabview_properties.selectedTab]
+              ->onKeyPress != NULL) {
+      inputHandled = component->children[component->tabview_properties.selectedTab]
+          ->onKeyPress(
+              component->children[component->tabview_properties.selectedTab],
+              keypress);
+  }else{
+    inputHandled = 0;
+  }
 
-  default:
-    // Pass to the component controller
-    if (component->tabview_properties.selectedTab < component->childCount &&
-        component->children[component->tabview_properties.selectedTab]
-                ->onKeyPress != NULL) {
-        inputHandled = component->children[component->tabview_properties.selectedTab]
-            ->onKeyPress(
-                component->children[component->tabview_properties.selectedTab],
-                keypress);
-    }else{
-      inputHandled = 0;
+  if (inputHandled == 0){
+    switch (keypress) {
+      case '3':
+        component->tabview_properties.selectedTab ==
+                (component->tabview_properties.tabCount - 1)
+            ?: component->tabview_properties.selectedTab++;
+        component->tabview_properties.snapTab = 1;
+        updateThisCMP = 1;
+        break;
+      case '1':
+        component->tabview_properties.selectedTab == 0
+            ?: component->tabview_properties.selectedTab--;
+        component->tabview_properties.snapTab = 1;
+        updateThisCMP = 1;
+        break;
+
+      default:
+        break;
     }
   }
   // component->isUpdated = 1;
@@ -1046,112 +1051,29 @@ int handleViewportInput(Component * component, char keypress){
 int handleSettingInput(Component *component, char keypress) {
   debug("Handling keypress on settings input: %c", keypress);
   Settings * settings = &component->settings_properties;
+  int keyHandled = 1;
   if (settings->focusElement == NULL){
     return 1;
   }
   if (settings->editing == 1){
+    //Handle keypress on the focused field
     switch(keypress){
       case 27:
         //Exit focused input
         settings->editing = 0;
         break;
-      case 'j':
-        // Down pressed
-        switch(settings->focusElement->fieldType){
-          case number_s:
-            //Decrease the input number
-            if (settings->focusElement->number_data.float_type == 0){
-              if (settings->focusElement->number_data.int_value > 0 ||
-                  (settings->focusElement->number_data.multiplyer < 
-                  (settings->focusElement->number_data.int_value - (INT_MIN+1)))){
-                settings->focusElement->number_data.int_value -= (int) settings->focusElement->number_data.multiplyer;
-              }else{
-                settings->focusElement->number_data.int_value = INT_MIN+1;
-              }
-            }else{
-            if (settings->focusElement->number_data.float_value > 0 ||
-                (settings->focusElement->number_data.multiplyer < 
-                  (settings->focusElement->number_data.float_value - INT_MIN))){
-                settings->focusElement->number_data.float_value -= settings->focusElement->number_data.multiplyer;
-              }else{
-                settings->focusElement->number_data.float_value = INT_MIN+1.0f;
-              }
-            }
-          default:
-            break;
-        }
-        if (component->settings_properties.fieldUpdated != NULL){
-          component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
-        }
-        break;
-      case 'k':
-        //Up pressed
-        switch(settings->focusElement->fieldType){
-          case number_s:
-            //Increase the input number
-            if (settings->focusElement->number_data.float_type == 0){
-              if (settings->focusElement->number_data.int_value < 0 ||
-                  (settings->focusElement->number_data.multiplyer < 
-                  (INT_MAX - settings->focusElement->number_data.int_value))){
-                settings->focusElement->number_data.int_value += (int) settings->focusElement->number_data.multiplyer;
-              }else{
-                settings->focusElement->number_data.int_value = INT_MAX-1;
-              }
-            }else{
-              if (settings->focusElement->number_data.float_type < 0 ||
-                  (settings->focusElement->number_data.multiplyer < 
-                  (INT_MAX - settings->focusElement->number_data.float_value))){
-                settings->focusElement->number_data.float_value += settings->focusElement->number_data.multiplyer;
-              }else{
-                settings->focusElement->number_data.float_value = INT_MAX-1.0f;
-              }
-            }
-          default:
-            break;
-        }
-        if (component->settings_properties.fieldUpdated != NULL){
-          component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
-        }
-        break;
-      case 'l':
-        //Up pressed
-        switch(settings->focusElement->fieldType){
-          case number_s:
-            if (settings->focusElement->number_data.float_type == 0){
-              if (settings->focusElement->number_data.multiplyer > 2) settings->focusElement->number_data.multiplyer /= 10;
-            }else{
-              //TODO: Fix the Multiplyer going wild
-              float inputNumber = settings->focusElement->number_data.multiplyer;
-              inputNumber = inputNumber < 0 ? -inputNumber : inputNumber;
-              if (inputNumber > 0.00001f) settings->focusElement->number_data.multiplyer /= 10.0f;
-              settings->focusElement->number_data.multiplyer = powf(10.0f, roundf(log10f(settings->focusElement->number_data.multiplyer)));
-            }
-          default:
-            break;
-        }
-        break;
-      case 'h':
-        //Up pressed
-        switch(settings->focusElement->fieldType){
-          case number_s:
-            if (settings->focusElement->number_data.multiplyer <= (INT_MAX * 0.15)){
-              settings->focusElement->number_data.multiplyer *= 10.0f;
-            }
-            settings->focusElement->number_data.multiplyer = powf(10.0f, roundf(log10f(settings->focusElement->number_data.multiplyer)));
-          default:
-            break;
-        }
-        break;
       default:
-        return 0;
-    }
-    debug("New multiplyer %f", settings->focusElement->number_data.multiplyer);
-    if (settings->focusElement->number_data.float_type == 0){
-      debug("New Value %d", settings->focusElement->number_data.int_value);
-    }else{
-      debug("New Value %f", settings->focusElement->number_data.float_value);
+        switch(settings->focusElement->fieldType){
+          case number_s:
+            keyHandled = handleSettingsNumberFieldKeypress(component, keypress);
+            break;
+          default:
+            keyHandled = 0;
+            break;
+        }
     }
   }else{
+    //Handle keypress on settings component without field in focus
     SettingsElement * nextSettingElement = settings->focusElement;
     int offset = 0;
     switch(keypress){
@@ -1166,7 +1088,6 @@ int handleSettingInput(Component *component, char keypress) {
             break;
           }
         }
-
         break;
       case 'k':
         //Go up
@@ -1199,15 +1120,143 @@ int handleSettingInput(Component *component, char keypress) {
         component->isVisible = 0;
         component->parent->children[0]->isVisible = 1;
         updateComponent(component->parent, 0);
-        return 1;
       default:
-        return 0;
+        keyHandled = 0;
+        break;
     }
   }
   updateComponent(component, 0);
+  return keyHandled;
+}
 
-  return 1;
+/*Function that handles the keypress when a number input is focused*/
+int handleSettingsNumberFieldKeypress(Component * component, char keypress){
+  Settings * settings = &component->settings_properties;
+  int keyHandled = 1;
+  switch(keypress){
+    //TODO: Move this gigant code to another functions for readability
+    case 'j':
+      // Down pressed
+      //Decrease the input number
+      if (settings->focusElement->number_data.float_type == 0){
+        if (settings->focusElement->number_data.int_value > 0 ||
+            (settings->focusElement->number_data.multiplyer < 
+            (settings->focusElement->number_data.int_value - (INT_MIN+1)))){
+          settings->focusElement->number_data.int_value -= (int) settings->focusElement->number_data.multiplyer;
+        }else{
+          settings->focusElement->number_data.int_value = INT_MIN+1;
+        }
+      }else{
+      if (settings->focusElement->number_data.float_value > 0 ||
+          (settings->focusElement->number_data.multiplyer < 
+            (settings->focusElement->number_data.float_value - INT_MIN))){
+          settings->focusElement->number_data.float_value -= settings->focusElement->number_data.multiplyer;
+        }else{
+          settings->focusElement->number_data.float_value = INT_MIN+1.0f;
+        }
+      }
+      if (component->settings_properties.fieldUpdated != NULL){
+        component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
+      }
+      break;
+    case 'k':
+      //Up pressed
+      //Increase the input number
+      if (settings->focusElement->number_data.float_type == 0){
+        if (settings->focusElement->number_data.int_value < 0 ||
+            (settings->focusElement->number_data.multiplyer < 
+            (INT_MAX - settings->focusElement->number_data.int_value))){
+          settings->focusElement->number_data.int_value += (int) settings->focusElement->number_data.multiplyer;
+        }else{
+          settings->focusElement->number_data.int_value = INT_MAX-1;
+        }
+      }else{
+        if (settings->focusElement->number_data.float_type < 0 ||
+            (settings->focusElement->number_data.multiplyer < 
+            (INT_MAX - settings->focusElement->number_data.float_value))){
+          settings->focusElement->number_data.float_value += settings->focusElement->number_data.multiplyer;
+        }else{
+          settings->focusElement->number_data.float_value = INT_MAX-1.0f;
+        }
+      }
+      if (component->settings_properties.fieldUpdated != NULL){
+        component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
+      }
+      break;
+    case 'l':
+      //Up pressed
+      switch(settings->focusElement->fieldType){
+        case number_s:
+          if (settings->focusElement->number_data.float_type == 0){
+            if (settings->focusElement->number_data.multiplyer > 2) settings->focusElement->number_data.multiplyer /= 10;
+          }else{
+            float inputNumber = settings->focusElement->number_data.multiplyer;
+            inputNumber = inputNumber < 0 ? -inputNumber : inputNumber;
+            if (inputNumber > 0.00001f) settings->focusElement->number_data.multiplyer /= 10.0f;
+            settings->focusElement->number_data.multiplyer = powf(10.0f, roundf(log10f(settings->focusElement->number_data.multiplyer)));
+          }
+        default:
+          break;
+      }
+      break;
+    case 'h':
+      //Up pressed
+      switch(settings->focusElement->fieldType){
+        case number_s:
+          if (settings->focusElement->number_data.multiplyer <= (INT_MAX * 0.15)){
+            settings->focusElement->number_data.multiplyer *= 10.0f;
+          }
+          settings->focusElement->number_data.multiplyer = powf(10.0f, roundf(log10f(settings->focusElement->number_data.multiplyer)));
+        default:
+          break;
+      }
+      break;
+    case 'c':
+      //TODO: Clear the content when C is pressed
+      if (settings->focusElement->number_data.float_type == 0){
+        settings->focusElement->number_data.int_value = 0;
+      }else{
+        settings->focusElement->number_data.float_value = 0;
+      }
+      settings->focusElement->number_data.multiplyer = 1.0f;
+      if (component->settings_properties.fieldUpdated != NULL){
+        component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
+      }
+      break;
+    case '0'...'9':
+      //To keep it simple, set the pressed number as the current multiplyer number.
+      //Take what's on the left and what's on the right. Add those up with the new input value
+      float multiplyer = settings->focusElement->number_data.multiplyer;
+      int pressedNumber = keypress - '0';
+      if (settings->focusElement->number_data.float_type == 1){
+        //Float number
+        float inputNumber = settings->focusElement->number_data.float_value;
+        int leftPart = (int) floor(inputNumber/(multiplyer*10.0f));
+        int currentPart = (int) floor(inputNumber/multiplyer);
+        float rightPart = inputNumber - (currentPart*multiplyer);
+        settings->focusElement->number_data.float_value = leftPart*multiplyer*10.0f +
+          pressedNumber * multiplyer + 
+          rightPart;
+      }else{
+        //Int Number
+        int inputNumber = settings->focusElement->number_data.int_value;
+        int leftPart = (int) floor(inputNumber/(multiplyer*10.0f));
+        int currentPart = (int) floor(inputNumber/multiplyer);
+        float rightPart = inputNumber - (currentPart*multiplyer);
+        settings->focusElement->number_data.float_value = leftPart*multiplyer*10 +
+          pressedNumber * multiplyer + 
+          rightPart;
 
+      }
+      if (component->settings_properties.fieldUpdated != NULL){
+        component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
+      }
+      break;
+    default:
+      keyHandled = 0;
+      break;
+  }
+  return keyHandled;
 }
 /*Function that imports a new object to the scene
  * uri: path to the object
