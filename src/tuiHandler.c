@@ -91,7 +91,7 @@ typedef struct TreeView {
   int highlightMode; // 0 highlight child context, 1 hightlight siblins context
 } TreeView;
 
-enum SettingFieldType { title_s, number_s, text_s, list_s, check_s};
+enum SettingFieldType { title_s, number_s, line_text_s, text_s, list_s, check_s};
 
 
 typedef struct NumberSetting{
@@ -105,6 +105,14 @@ typedef struct NumberSetting{
   int float_precision;
 } NumberSetting;
 
+typedef struct LineTextSetting{
+  int width;
+  int offset;
+  int cursorPosition;
+  char * textContent;
+  int maxTextSize;
+} LineTextSetting;
+
 
 typedef struct SettingsElement {
   struct SettingsElement *previousElement;
@@ -112,6 +120,7 @@ typedef struct SettingsElement {
   enum SettingFieldType fieldType;
   union{
     NumberSetting number_data;
+    LineTextSetting line_text_data;
   };
   char * title;
   void * textComponent;
@@ -237,6 +246,8 @@ void drawTabView(Component *component, Component *parent);
 void drawTextComponent(Component *component);
 void drawTreeView(Component *component);
 void drawSettingsComponent(Component *component);
+void drawNumberInputSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
+void drawLineTextSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
 void printText(int x, int y, char *text, Color bg, Color fg);
 void updateComponent(Component *component, int resize);
 void markComponentResized(Component *component);
@@ -262,6 +273,7 @@ Component * newSettingsComponent();
 SettingsElement * newSettingsElement(char * title, SettingsElement * prevElement, SettingsElement * nextElement);
 SettingsElement * newSettingsTitleElement(char * content, SettingsElement * prevElement, SettingsElement * nextElement);
 SettingsElement * newSettingsNumberInput(char * title, int isFloat, SettingsElement * prevElement, SettingsElement * nextElement);
+SettingsElement * newSettingsLineText(char * title, int textSize, SettingsElement * prevElement, SettingsElement * nextElement);
 Color *newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
@@ -1057,20 +1069,13 @@ int handleSettingInput(Component *component, char keypress) {
   }
   if (settings->editing == 1){
     //Handle keypress on the focused field
-    switch(keypress){
-      case 27:
-        //Exit focused input
-        settings->editing = 0;
+    switch(settings->focusElement->fieldType){
+      case number_s:
+        keyHandled = handleSettingsNumberFieldKeypress(component, keypress);
         break;
       default:
-        switch(settings->focusElement->fieldType){
-          case number_s:
-            keyHandled = handleSettingsNumberFieldKeypress(component, keypress);
-            break;
-          default:
-            keyHandled = 0;
-            break;
-        }
+        keyHandled = 0;
+        break;
     }
   }else{
     //Handle keypress on settings component without field in focus
@@ -1135,6 +1140,10 @@ int handleSettingsNumberFieldKeypress(Component * component, char keypress){
   int keyHandled = 1;
   switch(keypress){
     //TODO: Move this gigant code to another functions for readability
+    case 27:
+      //Exit focused input
+      settings->editing = 0;
+      break;
     case 'j':
       // Down pressed
       //Decrease the input number
@@ -1257,6 +1266,15 @@ int handleSettingsNumberFieldKeypress(Component * component, char keypress){
       break;
   }
   return keyHandled;
+}
+
+
+int handleSettingsLineTextKeypress(Component * component, char keypress){
+  //TODO: Enter the logic for interacting
+  //Left/Right arrow for moving
+  //any letter for inserting with the according buffer shift
+  //ret to delete with the according buffer shift
+  //esc for exiting the edition
 }
 /*Function that imports a new object to the scene
  * uri: path to the object
@@ -2723,6 +2741,7 @@ void drawSettingsComponent(Component *component) {
   int globalX = component->global_x;
   int width = component->real_width;
   int height = component->real_height;
+  int editing = 0;
   //Iterate over every settings component
   while (currentRowElement != NULL){
     //Check if this needs to be the selected one
@@ -2764,6 +2783,12 @@ void drawSettingsComponent(Component *component) {
       textComponent->text_properties.bgColor = component->settings_properties.colors[0];
     }
     drawTextComponent(textComponent);
+    if (component->settings_properties.focusElement == currentRowElement &&
+          component->settings_properties.editing == 1){
+      editing = 1;
+    }else{
+      editing = 0;
+    }
 
     //Draw the input widget
     switch (currentRowElement->fieldType) {
@@ -2772,104 +2797,12 @@ void drawSettingsComponent(Component *component) {
         break;
       case number_s:
         //Number input
-        //Draws at the end of the title
-        int start = strlen(currentRowElement->title)+1+globalX;
-        int end = start + currentRowElement->number_data.width;
-        if (end > (component->global_x + component->real_width)){
-          end = component->global_x + component->real_width;
-        }
-        int realInputWidth = end - start;
-        float multiplier = currentRowElement->number_data.multiplyer;
-
-        //Calculate the final string to print
-        char * finalStringBufffer = malloc(sizeof(char)*100);
-        char * numberStrBuffer = malloc(sizeof(char)*100);
-        char * blankSpacesBuffer = malloc(sizeof(char)*100);
-
-        int maxNumberStringBufferPos = 0;
-        int minNumberStringBufferPos = 0;
-        int multiplyerPos = floorf(log10f(multiplier));
-        int editing = 0;
-        int isNegative = 0;
-        if (component->settings_properties.focusElement == currentRowElement &&
-              component->settings_properties.editing == 1){
-          editing = 1;
-        }
-        if (currentRowElement->number_data.float_type == 0){
-          //calculate the size of the number
-          int inputNumber = currentRowElement->number_data.int_value;
-          if (inputNumber < 0) isNegative = 1;
-          int maxNumberPos = floorf(log10f(abs(inputNumber)));
-          if (inputNumber == 0) maxNumberPos = 0;
-          if (editing == 0) multiplyerPos = maxNumberPos;
-          maxNumberStringBufferPos = maxNumberPos > multiplyerPos ?  maxNumberPos : multiplyerPos;
-
-          if (maxNumberPos >= multiplyerPos){
-            blankSpacesBuffer[0] = '\0';
-          }else{
-            memset(blankSpacesBuffer, ' ', multiplyerPos-maxNumberPos);
-            blankSpacesBuffer[multiplyerPos-maxNumberPos] = '\0';
-          }
-          sprintf(numberStrBuffer, "%s%d", blankSpacesBuffer, inputNumber);
-        }else{
-          //calculate the size of the number
-          float inputNumber = currentRowElement->number_data.float_value;
-          float positiveNumber = currentRowElement->number_data.float_value < 0.0f ? -inputNumber : inputNumber;
-          if (inputNumber < 0.0f) isNegative = 1;
-          int maxNumberPos = floorf(log10f(positiveNumber));
-          if (positiveNumber < 1.0f) maxNumberPos = 0;
-          if (inputNumber == 0.0f) maxNumberPos = 0;
-          if (editing == 0) multiplyerPos = maxNumberPos;
-          else if(multiplyerPos<0) multiplyerPos -= 1;
-          maxNumberStringBufferPos = maxNumberPos > multiplyerPos ?  maxNumberPos : multiplyerPos;
-
-          if (maxNumberPos >= multiplyerPos){
-            blankSpacesBuffer[0] = '\0';
-          }else{
-            memset(blankSpacesBuffer, ' ', multiplyerPos-maxNumberPos);
-            blankSpacesBuffer[multiplyerPos-maxNumberPos] = '\0';
-          }
-          sprintf(numberStrBuffer, "%s%.5f", blankSpacesBuffer, inputNumber);
-        }
-
-        //Slice the final string to fit in the input
-        int idealStartPos = multiplyerPos + realInputWidth-1;
-        int numberStrBufferLen = strlen(numberStrBuffer);
-        int numberStrStartPos = idealStartPos < maxNumberStringBufferPos ? idealStartPos : maxNumberStringBufferPos;
-        int numberStrStartIndex = - numberStrStartPos + maxNumberStringBufferPos;
-
-
-        for (int i = 0; i<realInputWidth; i++){
-          if (i>=(numberStrBufferLen-numberStrStartIndex)){
-            finalStringBufffer[i] = ' ';
-          }else{
-            finalStringBufffer[i] = numberStrBuffer[numberStrStartIndex + i];
-          }
-        }
-        finalStringBufffer[realInputWidth] = '\0';
-        printText(start+1,
-            globalY + localRow+1,
-            finalStringBufffer,
-            component->settings_properties.colors[4], 
-            component->settings_properties.colors[5]
-            );
-
-        if (editing){
-          //Hihglight the multiplyer
-          char * hightlightChar = malloc(sizeof(char)*2);
-          sprintf(hightlightChar, "%c", numberStrBuffer[-multiplyerPos + maxNumberStringBufferPos+isNegative]);
-          printText(start+isNegative+1+(numberStrStartPos-multiplyerPos),
-              globalY + localRow+1,
-              hightlightChar,
-              component->settings_properties.colors[0], 
-              component->settings_properties.colors[1]
-              );
-          free(hightlightChar);
-        }
-        free(numberStrBuffer);
-        free(blankSpacesBuffer);
-        free(finalStringBufffer);
-
+        drawNumberInputSetting(component, currentRowElement, globalX, globalY, localRow, editing);
+        break;
+      
+      case line_text_s:
+        drawLineTextSetting(component, currentRowElement, globalX, globalY, localRow, editing);
+        break;
 
       default:
         break;
@@ -2877,8 +2810,155 @@ void drawSettingsComponent(Component *component) {
     currentRowElement = currentRowElement->nextElement;
     localRow++;
   }
+}
+
+void drawLineTextSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing){
+  //Draw the text content from the offset and add white spaces if there is more space
+  int start = strlen(currentRowElement->title)+1+globalX;
+  int end = start + currentRowElement->number_data.width;
+  if (end > (component->global_x + component->real_width)){
+    end = component->global_x + component->real_width;
+  }
+  int realInputWidth = end - start;
+
+  char * printBuffer = malloc(sizeof(char) * realInputWidth+1);
+  char * textContent = currentRowElement->line_text_data.textContent;
+  int offset = currentRowElement->line_text_data.offset;
+
+  int textSizeToPrint = strlen(textContent) - offset;
+  if (textSizeToPrint > realInputWidth) textSizeToPrint = realInputWidth;
+
+  sprintf(printBuffer, "%.*s", textSizeToPrint, textContent+offset);
+  
+  if (realInputWidth > textSizeToPrint) {
+    memset(printBuffer+textSizeToPrint, ' ', realInputWidth - textSizeToPrint);
+  }
+  printBuffer[realInputWidth] = '\0';
+
+  //Print the text component
+  printText(start+1,
+      globalY + localRow+1,
+      printBuffer,
+      component->settings_properties.colors[4], 
+      component->settings_properties.colors[5]
+      );
+
+  //Add the cursor if editing
+  if (editing){
+    char * hightlightChar = malloc(sizeof(char)*2);
+    int highlightOffset = currentRowElement->line_text_data.cursorPosition - offset;
+    if (highlightOffset > 0 && highlightOffset < realInputWidth){
+      hightlightChar[0] = printBuffer[highlightOffset];
+      hightlightChar[1] = '\0';
+      printText(start+1+highlightOffset,
+          globalY + localRow+1,
+          hightlightChar,
+          component->settings_properties.colors[4], 
+          component->settings_properties.colors[5]
+          );
+    }
+    free(hightlightChar);
+  }
+  free(printBuffer);
+}
+
+void drawNumberInputSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing){
+    //Draws at the end of the title
+    int start = strlen(currentRowElement->title)+1+globalX;
+    int end = start + currentRowElement->number_data.width;
+    if (end > (component->global_x + component->real_width)){
+      end = component->global_x + component->real_width;
+    }
+    int realInputWidth = end - start;
+    float multiplier = currentRowElement->number_data.multiplyer;
+
+    //Calculate the final string to print
+    char * finalStringBufffer = malloc(sizeof(char)*100);
+    char * numberStrBuffer = malloc(sizeof(char)*100);
+    char * blankSpacesBuffer = malloc(sizeof(char)*100);
+
+    int maxNumberStringBufferPos = 0;
+    int minNumberStringBufferPos = 0;
+    int multiplyerPos = floorf(log10f(multiplier));
+    int isNegative = 0;
+    if (currentRowElement->number_data.float_type == 0){
+      //calculate the size of the number
+      int inputNumber = currentRowElement->number_data.int_value;
+      if (inputNumber < 0) isNegative = 1;
+      int maxNumberPos = floorf(log10f(abs(inputNumber)));
+      if (inputNumber == 0) maxNumberPos = 0;
+      if (editing == 0) multiplyerPos = maxNumberPos;
+      maxNumberStringBufferPos = maxNumberPos > multiplyerPos ?  maxNumberPos : multiplyerPos;
+
+      if (maxNumberPos >= multiplyerPos){
+        blankSpacesBuffer[0] = '\0';
+      }else{
+        memset(blankSpacesBuffer, ' ', multiplyerPos-maxNumberPos);
+        blankSpacesBuffer[multiplyerPos-maxNumberPos] = '\0';
+      }
+      sprintf(numberStrBuffer, "%s%d", blankSpacesBuffer, inputNumber);
+    }else{
+      //calculate the size of the number
+      float inputNumber = currentRowElement->number_data.float_value;
+      float positiveNumber = currentRowElement->number_data.float_value < 0.0f ? -inputNumber : inputNumber;
+      if (inputNumber < 0.0f) isNegative = 1;
+      int maxNumberPos = floorf(log10f(positiveNumber));
+      if (positiveNumber < 1.0f) maxNumberPos = 0;
+      if (inputNumber == 0.0f) maxNumberPos = 0;
+      if (editing == 0) multiplyerPos = maxNumberPos;
+      else if(multiplyerPos<0) multiplyerPos -= 1;
+      maxNumberStringBufferPos = maxNumberPos > multiplyerPos ?  maxNumberPos : multiplyerPos;
+
+      if (maxNumberPos >= multiplyerPos){
+        blankSpacesBuffer[0] = '\0';
+      }else{
+        memset(blankSpacesBuffer, ' ', multiplyerPos-maxNumberPos);
+        blankSpacesBuffer[multiplyerPos-maxNumberPos] = '\0';
+      }
+      sprintf(numberStrBuffer, "%s%.5f", blankSpacesBuffer, inputNumber);
+    }
+
+    //Slice the final string to fit in the input
+    int idealStartPos = multiplyerPos + realInputWidth-1;
+    int numberStrBufferLen = strlen(numberStrBuffer);
+    int numberStrStartPos = idealStartPos < maxNumberStringBufferPos ? idealStartPos : maxNumberStringBufferPos;
+    int numberStrStartIndex = - numberStrStartPos + maxNumberStringBufferPos;
+
+
+    for (int i = 0; i<realInputWidth; i++){
+      if (i>=(numberStrBufferLen-numberStrStartIndex)){
+        finalStringBufffer[i] = ' ';
+      }else{
+        finalStringBufffer[i] = numberStrBuffer[numberStrStartIndex + i];
+      }
+    }
+    finalStringBufffer[realInputWidth] = '\0';
+    printText(start+1,
+        globalY + localRow+1,
+        finalStringBufffer,
+        component->settings_properties.colors[4], 
+        component->settings_properties.colors[5]
+        );
+
+    if (editing){
+      //Hihglight the multiplyer
+      char * hightlightChar = malloc(sizeof(char)*2);
+      sprintf(hightlightChar, "%c", numberStrBuffer[-multiplyerPos + maxNumberStringBufferPos+isNegative]);
+      printText(start+isNegative+1+(numberStrStartPos-multiplyerPos),
+          globalY + localRow+1,
+          hightlightChar,
+          component->settings_properties.colors[0], 
+          component->settings_properties.colors[1]
+          );
+      free(hightlightChar);
+    }
+    free(numberStrBuffer);
+    free(blankSpacesBuffer);
+    free(finalStringBufffer);
 
 }
+
+
 
 void drawUI() {
   updateAxis();
@@ -3831,7 +3911,7 @@ SettingsElement * newSettingsNumberInput(char * title, int isFloat, SettingsElem
   element->fieldType = number_s;
   element->number_data.float_type = isFloat;
   element->number_data.multiplyer = 1;
-  element->number_data.width = 8;
+  element->number_data.width = 12;
   element->number_data.float_precision = 5;
   if (isFloat) element->number_data.float_value = 0.0f;
   else element->number_data.int_value = 0;
@@ -3839,6 +3919,17 @@ SettingsElement * newSettingsNumberInput(char * title, int isFloat, SettingsElem
   return element;
 }
 
+SettingsElement * newSettingsLineText(char * title, int textSize, SettingsElement * prevElement, SettingsElement * nextElement){
+  SettingsElement * element = newSettingsElement(title, prevElement, nextElement);
+  element->fieldType = line_text_s;
+  element->line_text_data.maxTextSize = textSize > 0 ? textSize : 100;
+  element->line_text_data.textContent = malloc(sizeof(char)*element->line_text_data.maxTextSize);
+  element->line_text_data.cursorPosition = 0;
+  element->line_text_data.offset = 0;
+  element->line_text_data.width = 12;
+
+  return element;
+}
 /*Creates new color based on an Hex string*/
 Color *newColor(uint8_t r, uint8_t g, uint8_t b) {
   Color *retPtr = malloc(sizeof(Color));
