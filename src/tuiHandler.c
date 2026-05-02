@@ -282,6 +282,7 @@ void handleInputNoFocus(char keypress);
 int handleTreeViewInput(Component *component, char keypress);
 int handleSettingInput(Component *component, char keypress);
 int handleSettingsNumberFieldKeypress(Component * component, char keypress);
+int handleSettingsLineTextKeypress(Component * component, char keypress);
 void handleObjectPropertiesUpdate(int position, SettingsElement * settingElement);
 void closeProgram();
 
@@ -610,7 +611,7 @@ int handleTreeViewInput(Component *component, char keypress) {
       calculateHintsObjectManager();
       updateComponent(component->parent, 0);
       component->parent->children[1]->settings_properties.focusElement = NULL;
-      component->parent->children[1]->settings_properties.child->title = selectedTreeElem->texts.table[2];
+      component->parent->children[1]->settings_properties.child->line_text_data.textContent = selectedTreeElem->texts.table[2];
 
       //Update the properties view
       SettingsElement * currentElement = objectPropertiesComponent->settings_properties.child;
@@ -1073,6 +1074,9 @@ int handleSettingInput(Component *component, char keypress) {
       case number_s:
         keyHandled = handleSettingsNumberFieldKeypress(component, keypress);
         break;
+      case line_text_s:
+        keyHandled = handleSettingsLineTextKeypress(component, keypress);
+        break;
       default:
         keyHandled = 0;
         break;
@@ -1139,7 +1143,6 @@ int handleSettingsNumberFieldKeypress(Component * component, char keypress){
   Settings * settings = &component->settings_properties;
   int keyHandled = 1;
   switch(keypress){
-    //TODO: Move this gigant code to another functions for readability
     case 27:
       //Exit focused input
       settings->editing = 0;
@@ -1275,7 +1278,44 @@ int handleSettingsLineTextKeypress(Component * component, char keypress){
   //any letter for inserting with the according buffer shift
   //ret to delete with the according buffer shift
   //esc for exiting the edition
+  Settings * cmpSettings = &component->settings_properties;
+  LineTextSetting * lineSettings = &cmpSettings->focusElement->line_text_data;
+
+
+  int keyHandled = 1;
+  switch(keypress){
+    case 27:
+      //Exit focused input
+      cmpSettings->editing = 0;
+      break;
+    case 'l':
+      //Move cursor left
+      if (lineSettings->cursorPosition == (lineSettings->maxTextSize-1)){
+        break;
+      }
+      lineSettings->cursorPosition++;
+      if (lineSettings->cursorPosition > (lineSettings->offset + lineSettings->width-1)){
+        lineSettings->offset++;
+      }
+      break;
+    case 'h':
+      //Move cursor right
+      if (lineSettings->cursorPosition == 0){
+        break;
+      }
+      lineSettings->cursorPosition--;
+      if (lineSettings->cursorPosition < lineSettings->offset){
+        lineSettings->offset--;
+      }
+      break;
+      
+    default:
+      keyHandled = 0;
+      break;
+  }
+  return keyHandled;
 }
+
 /*Function that imports a new object to the scene
  * uri: path to the object
  * format: 0 stl*/
@@ -1638,7 +1678,7 @@ void initUI() {
   objectPropertiesCmp->border = 0;
   objectPropertiesCmp->onKeyPress = handleObjectPropertiesKeyPress;
 
-  objectPropertiesCmp->settings_properties.child = newSettingsTitleElement("Title test", NULL, NULL);
+  objectPropertiesCmp->settings_properties.child = newSettingsLineText("Object Name", 0, NULL, NULL);
   objectPropertiesCmp->settings_properties.fieldUpdated = handleObjectPropertiesUpdate;
   SettingsElement * settingElement = newSettingsTitleElement("Position", objectPropertiesCmp->settings_properties.child, NULL);
   settingElement = newSettingsNumberInput("x", 1, settingElement, NULL);
@@ -2813,9 +2853,10 @@ void drawSettingsComponent(Component *component) {
 }
 
 void drawLineTextSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing){
+  debug("Drawing text settings");
   //Draw the text content from the offset and add white spaces if there is more space
   int start = strlen(currentRowElement->title)+1+globalX;
-  int end = start + currentRowElement->number_data.width;
+  int end = start + currentRowElement->line_text_data.width;
   if (end > (component->global_x + component->real_width)){
     end = component->global_x + component->real_width;
   }
@@ -2826,6 +2867,7 @@ void drawLineTextSetting(Component * component, SettingsElement * currentRowElem
   int offset = currentRowElement->line_text_data.offset;
 
   int textSizeToPrint = strlen(textContent) - offset;
+  if (textSizeToPrint < 0) textSizeToPrint = 0;
   if (textSizeToPrint > realInputWidth) textSizeToPrint = realInputWidth;
 
   sprintf(printBuffer, "%.*s", textSizeToPrint, textContent+offset);
@@ -2835,6 +2877,7 @@ void drawLineTextSetting(Component * component, SettingsElement * currentRowElem
   }
   printBuffer[realInputWidth] = '\0';
 
+  debug("Printing textSetting content: %s", printBuffer);
   //Print the text component
   printText(start+1,
       globalY + localRow+1,
@@ -2847,14 +2890,14 @@ void drawLineTextSetting(Component * component, SettingsElement * currentRowElem
   if (editing){
     char * hightlightChar = malloc(sizeof(char)*2);
     int highlightOffset = currentRowElement->line_text_data.cursorPosition - offset;
-    if (highlightOffset > 0 && highlightOffset < realInputWidth){
+    if (highlightOffset >= 0 && highlightOffset < realInputWidth){
       hightlightChar[0] = printBuffer[highlightOffset];
       hightlightChar[1] = '\0';
       printText(start+1+highlightOffset,
           globalY + localRow+1,
           hightlightChar,
-          component->settings_properties.colors[4], 
-          component->settings_properties.colors[5]
+          component->settings_properties.colors[0], 
+          component->settings_properties.colors[1]
           );
     }
     free(hightlightChar);
