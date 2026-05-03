@@ -294,6 +294,7 @@ void restoreTerminal();
 void get_terminal_size(int *rows, int *cols);
 
 void addStringToTable(char *string, StringTable *table);
+void editStringTableEntry(char * string, int entryIndex, StringTable *table);
 StringTable newStringTable(char *string);
 void emptyComponentTable(ComponentTable *table);
 ComponentTable newComponentTable(Component *cmp);
@@ -417,6 +418,9 @@ void handleObjectPropertiesUpdate(int position, SettingsElement * settingElement
   int updated = 1;
   // Update the object field associated to the updated setting field
   switch(position){
+    case 0:
+      editStringTableEntry(settingElement->line_text_data.textContent, 2, &(selectedTreeElem->texts));
+      updated = 0;
     case 2:
       selectedObject->pos.x = settingElement->number_data.float_value;
       break;
@@ -611,7 +615,9 @@ int handleTreeViewInput(Component *component, char keypress) {
       calculateHintsObjectManager();
       updateComponent(component->parent, 0);
       component->parent->children[1]->settings_properties.focusElement = NULL;
-      component->parent->children[1]->settings_properties.child->line_text_data.textContent = selectedTreeElem->texts.table[2];
+      memcpy(component->parent->children[1]->settings_properties.child->line_text_data.textContent,
+          selectedTreeElem->texts.table[2],
+          strlen(selectedTreeElem->texts.table[2]));
 
       //Update the properties view
       SettingsElement * currentElement = objectPropertiesComponent->settings_properties.child;
@@ -1287,10 +1293,13 @@ int handleSettingsLineTextKeypress(Component * component, char keypress){
     case 27:
       //Exit focused input
       cmpSettings->editing = 0;
+      if (component->settings_properties.fieldUpdated != NULL){
+        component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
+      }
       break;
-    case 'l':
+    case (char) 253:
       //Move cursor left
-      if (lineSettings->cursorPosition == (lineSettings->maxTextSize-1)){
+      if (lineSettings->cursorPosition == (strlen(lineSettings->textContent))){
         break;
       }
       lineSettings->cursorPosition++;
@@ -1298,7 +1307,7 @@ int handleSettingsLineTextKeypress(Component * component, char keypress){
         lineSettings->offset++;
       }
       break;
-    case 'h':
+    case (char) 252:
       //Move cursor right
       if (lineSettings->cursorPosition == 0){
         break;
@@ -1309,8 +1318,40 @@ int handleSettingsLineTextKeypress(Component * component, char keypress){
       }
       break;
       
+    case '\n':
+      //Prevent the enter from doing something
+      break;
+
+    case '':
+      //Backspace, shift all buffer from cursor to the left
+      if (lineSettings->cursorPosition == 0) break;
+      memmove(lineSettings->textContent + lineSettings->cursorPosition-1,
+          lineSettings->textContent + lineSettings->cursorPosition,
+          strlen(lineSettings->textContent) - lineSettings->cursorPosition +1
+          );
+
+      //Move cursor one position left
+      if (lineSettings->cursorPosition > 0){
+          lineSettings->cursorPosition--;
+      }
+      break;
     default:
-      keyHandled = 0;
+      //Any key press
+      //Shift all chars to right from the cursor position onwards
+      int contentEnd = strlen(lineSettings->textContent)-1;
+      lineSettings->textContent[contentEnd+1] = '\0';
+      if (contentEnd > (lineSettings->maxTextSize-2)) contentEnd = lineSettings->maxTextSize - 2;
+      memmove(lineSettings->textContent + lineSettings->cursorPosition + 1,
+          lineSettings->textContent + lineSettings->cursorPosition,
+          contentEnd - lineSettings->cursorPosition +1
+          );
+      lineSettings->textContent[lineSettings->cursorPosition] = keypress;
+
+      //Move cursor one position right
+      if (lineSettings->cursorPosition < (lineSettings->maxTextSize - 1)){
+          lineSettings->cursorPosition++;
+      }
+
       break;
   }
   return keyHandled;
@@ -1678,7 +1719,7 @@ void initUI() {
   objectPropertiesCmp->border = 0;
   objectPropertiesCmp->onKeyPress = handleObjectPropertiesKeyPress;
 
-  objectPropertiesCmp->settings_properties.child = newSettingsLineText("Object Name", 0, NULL, NULL);
+  objectPropertiesCmp->settings_properties.child = newSettingsLineText("Object Name", 10, NULL, NULL);
   objectPropertiesCmp->settings_properties.fieldUpdated = handleObjectPropertiesUpdate;
   SettingsElement * settingElement = newSettingsTitleElement("Position", objectPropertiesCmp->settings_properties.child, NULL);
   settingElement = newSettingsNumberInput("x", 1, settingElement, NULL);
@@ -2064,25 +2105,31 @@ int handleInput() {
   char ch;
   if (read(STDIN_FILENO, &ch, 1) > 0) {
     debug("Char presser: %c", ch);
+    int charUpdated = 1;
     switch (ch) {
       case 'Q': 
         // Process closing
         closeProgram();
         return 1;
         break;
-      case '[':
-        if (focusComponent == NULL) return 0;
-        if (read(STDIN_FILENO, &ch, 1) == 0) return 0;
-        debug("Char presser: %c", ch);
-        switch (ch){ // Up, Down, Right, Left
-          case 'A': focusComponent->onKeyPress(focusComponent, (char) 255); break;
-          case 'B': focusComponent->onKeyPress(focusComponent, (char) 254); break;
-          case 'C': focusComponent->onKeyPress(focusComponent, (char) 253); break;
-          case 'D': focusComponent->onKeyPress(focusComponent, (char) 252); break;
+      case '':
+        ch = 27;
+        // Check if more chars are input
+        if (read(STDIN_FILENO, &ch, 1) == 0) break;
+
+        //Check if input was an arrow
+        if (ch == '['){
+          if (read(STDIN_FILENO, &ch, 1) == 0) return 0;
+          ch = 255 - (ch - 'A');
         }
-        return 0;
+        break;
+      case '[':
+        break;
+      default:
+        charUpdated = 0;
         break;
     }
+    if (charUpdated) debug("Char presser: %c", ch);
     // Pass the event to the focused component
     if (focusComponent == NULL) handleInputNoFocus(ch);
     else focusComponent->onKeyPress(focusComponent, ch);
@@ -3966,7 +4013,7 @@ SettingsElement * newSettingsLineText(char * title, int textSize, SettingsElemen
   SettingsElement * element = newSettingsElement(title, prevElement, nextElement);
   element->fieldType = line_text_s;
   element->line_text_data.maxTextSize = textSize > 0 ? textSize : 100;
-  element->line_text_data.textContent = malloc(sizeof(char)*element->line_text_data.maxTextSize);
+  element->line_text_data.textContent = malloc(sizeof(char)*element->line_text_data.maxTextSize+1);
   element->line_text_data.cursorPosition = 0;
   element->line_text_data.offset = 0;
   element->line_text_data.width = 12;
@@ -4014,6 +4061,25 @@ void addStringToTable(char *string, StringTable *table) {
         table->table[table->length]);
   table->length++;
 }
+
+
+/**
+ * editStringTableEntry - Edits an entry on a String Table
+ *
+ * @string String to be inserted
+ * @entryIndex Index in the table to be changed
+ * @table String Table to be updated
+ */
+void editStringTableEntry(char * string, int entryIndex, StringTable *table){
+  //Free the current string
+  free(table->table[entryIndex]);
+
+  //Insert the new one
+  table->table[entryIndex] = malloc(sizeof(char) * strlen(string) +1);
+  strcpy(table->table[entryIndex], string);
+}
+
+
 
 /*Function that return next treeViewElement in order, not caring about height*/
 TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
