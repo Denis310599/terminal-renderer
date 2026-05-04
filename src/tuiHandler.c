@@ -113,6 +113,10 @@ typedef struct LineTextSetting{
   int maxTextSize;
 } LineTextSetting;
 
+typedef struct CheckSetting{
+  int status; //0 False, 1 True, -1 Other
+  int triState;
+} CheckSetting;
 
 typedef struct SettingsElement {
   struct SettingsElement *previousElement;
@@ -121,6 +125,7 @@ typedef struct SettingsElement {
   union{
     NumberSetting number_data;
     LineTextSetting line_text_data;
+    CheckSetting check_data;
   };
   char * title;
   void * textComponent;
@@ -248,6 +253,7 @@ void drawTreeView(Component *component);
 void drawSettingsComponent(Component *component);
 void drawNumberInputSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
 void drawLineTextSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
+void drawCheckSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow);
 void printText(int x, int y, char *text, Color bg, Color fg);
 void updateComponent(Component *component, int resize);
 void markComponentResized(Component *component);
@@ -274,6 +280,7 @@ SettingsElement * newSettingsElement(char * title, SettingsElement * prevElement
 SettingsElement * newSettingsTitleElement(char * content, SettingsElement * prevElement, SettingsElement * nextElement);
 SettingsElement * newSettingsNumberInput(char * title, int isFloat, SettingsElement * prevElement, SettingsElement * nextElement);
 SettingsElement * newSettingsLineText(char * title, int textSize, SettingsElement * prevElement, SettingsElement * nextElement);
+SettingsElement * newSettingsCheck(char * title, int triState, SettingsElement * prevElement, SettingsElement * nextElement);
 Color *newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
@@ -448,6 +455,9 @@ void handleObjectPropertiesUpdate(int position, SettingsElement * settingElement
     case 12:
       selectedObject->rot.z = settingElement->number_data.float_value;
       break;
+    case 14:
+      selectedObject->visible = settingElement->check_data.status;
+      break;
     default:
       updated = 0;
   }
@@ -619,6 +629,7 @@ int handleTreeViewInput(Component *component, char keypress) {
       memcpy(component->parent->children[1]->settings_properties.child->line_text_data.textContent,
           selectedTreeElem->texts.table[2],
           strlen(selectedTreeElem->texts.table[2]));
+      component->parent->children[1]->settings_properties.child->line_text_data.textContent[strlen(selectedTreeElem->texts.table[2])] = 0;
 
       //Update the properties view
       SettingsElement * currentElement = objectPropertiesComponent->settings_properties.child;
@@ -652,6 +663,8 @@ int handleTreeViewInput(Component *component, char keypress) {
           case 12:
             currentElement->number_data.float_value = selectedObject->rot.z;
             break;
+          case 14:
+            currentElement->check_data.status = selectedObject->visible;
         }
         currentElement = currentElement->nextElement;
         row++;
@@ -1127,6 +1140,21 @@ int handleSettingInput(Component *component, char keypress) {
             case number_s:
               settings->focusElement->number_data.multiplyer = 1;
               break;
+            case check_s:
+              settings->editing = 0;
+              settings->focusElement->check_data.status++;
+              if (settings->focusElement->check_data.status > 1){
+                if (settings->focusElement->check_data.triState){
+                  settings->focusElement->check_data.status = -1;
+                }else{
+                  settings->focusElement->check_data.status = 0;
+                }
+              }
+              //Handle the callback
+              if (component->settings_properties.fieldUpdated != NULL){
+                component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
+              }
+              break;
             default:
               break;
           }
@@ -1281,11 +1309,91 @@ int handleSettingsNumberFieldKeypress(Component * component, char keypress){
 
 
 int handleSettingsLineTextKeypress(Component * component, char keypress){
-  //TODO: Enter the logic for interacting
-  //Left/Right arrow for moving
-  //any letter for inserting with the according buffer shift
-  //ret to delete with the according buffer shift
-  //esc for exiting the edition
+  Settings * cmpSettings = &component->settings_properties;
+  LineTextSetting * lineSettings = &cmpSettings->focusElement->line_text_data;
+
+
+  int keyHandled = 1;
+  switch(keypress){
+    case 27:
+      //Exit focused input
+      cmpSettings->editing = 0;
+      if (component->settings_properties.fieldUpdated != NULL){
+        component->settings_properties.fieldUpdated(component->settings_properties.focusElementIndex, component->settings_properties.focusElement);
+      }
+      break;
+    case (char) 255:
+    case (char) 254:
+      //Ignore up and down arrows
+      break;
+    case (char) 253:
+      //Move cursor left
+      if (lineSettings->cursorPosition == (strlen(lineSettings->textContent))){
+        break;
+      }
+      lineSettings->cursorPosition++;
+      if (lineSettings->cursorPosition > (lineSettings->offset + lineSettings->width-1)){
+        lineSettings->offset++;
+      }
+      break;
+    case (char) 252:
+      //Move cursor right
+      if (lineSettings->cursorPosition == 0){
+        break;
+      }
+      lineSettings->cursorPosition--;
+      if (lineSettings->cursorPosition < lineSettings->offset){
+        lineSettings->offset--;
+      }
+      break;
+      
+    case '\n':
+      //Prevent the enter from doing something
+      break;
+
+    case '':
+      //Backspace, shift all buffer from cursor to the left
+      if (lineSettings->cursorPosition == 0) break;
+      memmove(lineSettings->textContent + lineSettings->cursorPosition-1,
+          lineSettings->textContent + lineSettings->cursorPosition,
+          strlen(lineSettings->textContent) - lineSettings->cursorPosition +1
+          );
+
+      //Move cursor one position left
+      if (lineSettings->cursorPosition > 0){
+          lineSettings->cursorPosition--;
+      }
+      break;
+    case (char) 251:
+      //Sup, shift all buffer from cursor to the left
+      memmove(lineSettings->textContent + lineSettings->cursorPosition,
+          lineSettings->textContent + lineSettings->cursorPosition+1,
+          strlen(lineSettings->textContent) - lineSettings->cursorPosition
+          );
+      break;
+    default:
+      //Any key press
+      //Shift all chars to right from the cursor position onwards
+      int contentEnd = strlen(lineSettings->textContent)-1;
+      lineSettings->textContent[contentEnd+1] = '\0';
+      if (contentEnd > (lineSettings->maxTextSize-2)) contentEnd = lineSettings->maxTextSize - 2;
+      memmove(lineSettings->textContent + lineSettings->cursorPosition + 1,
+          lineSettings->textContent + lineSettings->cursorPosition,
+          contentEnd - lineSettings->cursorPosition +1
+          );
+      lineSettings->textContent[lineSettings->cursorPosition] = keypress;
+
+      //Move cursor one position right
+      if (lineSettings->cursorPosition < (lineSettings->maxTextSize - 1)){
+          lineSettings->cursorPosition++;
+      }
+
+      break;
+  }
+  return keyHandled;
+}
+
+int handleSettingsCheckKeypress(Component * component, char keypress){
   Settings * cmpSettings = &component->settings_properties;
   LineTextSetting * lineSettings = &cmpSettings->focusElement->line_text_data;
 
@@ -1358,7 +1466,6 @@ int handleSettingsLineTextKeypress(Component * component, char keypress){
   }
   return keyHandled;
 }
-
 /*Function that imports a new object to the scene
  * uri: path to the object
  * format: 0 stl*/
@@ -1735,6 +1842,8 @@ void initUI() {
   settingElement = newSettingsNumberInput("x", 1, settingElement, NULL);
   settingElement = newSettingsNumberInput("y", 1, settingElement, NULL);
   settingElement = newSettingsNumberInput("z", 1, settingElement, NULL);
+  settingElement = newSettingsTitleElement("", settingElement, NULL);
+  settingElement = newSettingsCheck("Visible", 0, settingElement, NULL);
   /*
   TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
   treeView->treeview_properties.child = treeViewElem;
@@ -2122,7 +2231,19 @@ int handleInput() {
         //Check if input was an arrow
         if (ch == '['){
           if (read(STDIN_FILENO, &ch, 1) == 0) return 0;
-          ch = 255 - (ch - 'A');
+          debug("Char presser: %d", ch);
+          switch (ch){
+            case 'A':
+            case 'B':
+            case 'C':
+            case 'D':
+              ch = 255 - (ch - 'A');
+              break;
+            case (char) 51:
+              while (read(STDIN_FILENO, &ch, 1) > 0);
+              ch = (char) 251;
+              break;
+          }
         }
         break;
       case '[':
@@ -2894,6 +3015,9 @@ void drawSettingsComponent(Component *component) {
         drawLineTextSetting(component, currentRowElement, globalX, globalY, localRow, editing);
         break;
 
+      case check_s:
+        drawCheckSetting(component, currentRowElement, globalX, globalY, localRow);
+
       default:
         break;
     }
@@ -2953,6 +3077,31 @@ void drawLineTextSetting(Component * component, SettingsElement * currentRowElem
     free(hightlightChar);
   }
   free(printBuffer);
+}
+
+void drawCheckSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow){
+  debug("Drawing check settings");
+  //Draw the text content from the offset and add white spaces if there is more space
+  char * printBuffer;
+  int start = strlen(currentRowElement->title)+1+globalX;
+  switch(currentRowElement->check_data.status){
+    case -1:
+      printBuffer = "[-]";
+      break;
+    case 0:
+      printBuffer = "[ ]";
+      break;
+    case 1:
+      printBuffer = "[]";
+      break;
+  }
+
+  printText(start+1,
+      globalY + localRow+1,
+      printBuffer,
+      component->settings_properties.colors[4], 
+      component->settings_properties.colors[5]
+      );
 }
 
 void drawNumberInputSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing){
@@ -4020,6 +4169,15 @@ SettingsElement * newSettingsLineText(char * title, int textSize, SettingsElemen
   element->line_text_data.cursorPosition = 0;
   element->line_text_data.offset = 0;
   element->line_text_data.width = 12;
+
+  return element;
+}
+
+SettingsElement * newSettingsCheck(char * title, int triState, SettingsElement * prevElement, SettingsElement * nextElement){
+  SettingsElement * element = newSettingsElement(title, prevElement, nextElement);
+  element->fieldType = check_s;
+  element->check_data.status = 0;
+  element->check_data.triState = triState;
 
   return element;
 }
