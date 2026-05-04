@@ -602,13 +602,14 @@ int handleTreeViewInput(Component *component, char keypress) {
       break;
     case 27:
       focusComponent = NULL;
+      objectManagerData->lastSelectedElement = component->treeview_properties.selectedElement;
       component->treeview_properties.selectedElement = NULL;
       updateComponent(component, 0);
       updateComponent(viewport, 0);
       selectedObject = NULL;
       commandHintComponent->text_properties.content = "\0";
-      break;
       return 1;
+      break;
     case '\n':
       component->isVisible = 0;
       component->parent->children[1]->isVisible = 1;
@@ -935,6 +936,7 @@ void handleInputNoFocus(char keypress){
       break;
     case '2':
       focusComponent = objectManagerComponent;
+      debug("Last selected Item: %d", objectManagerData->lastSelectedElement);
         if (objectManagerData->lastSelectedElement != NULL){
         selectedObject = objectManagerData->lastSelectedElement->data;
         selectedTreeElem = objectManagerData->lastSelectedElement;
@@ -2809,8 +2811,9 @@ void drawTreeView(Component *component) {
           current->parentElement->status == 2) {
         highlightContext = 1;
       } else if (component->treeview_properties.highlightMode == 1 &&
-                 component->treeview_properties.selectedElement
-                         ->parentElement == current->parentElement) {
+                 (component->treeview_properties.selectedElement != NULL &&
+                    component->treeview_properties.selectedElement->parentElement == current->parentElement)
+                ) {
         highlightContext = 1;
       }
     }
