@@ -279,6 +279,12 @@ void resizeWindow(ViewportSettings * viewport_settings){
 
 	//I dont know if this will fail, don't know if this address won't be accessed by other part of the program
 	//spoiler: it failed, but i fixed it
+	if (*(viewport_settings->pixel_data_buffer) != NULL){
+		free(*(viewport_settings->pixel_data_buffer));
+	}
+	if (*(viewport_settings->gpu_frame_buffer) != NULL){
+		free(*(viewport_settings->gpu_frame_buffer));
+	}
 	free(viewport_settings->pixel_data_buffer);
 	free(viewport_settings->gpu_frame_buffer);
 	viewport_settings->pixel_data_buffer = frameBufferPtr;
@@ -660,6 +666,7 @@ int loadModelGPU(Object * modelToLoad){
 	//glBindBuffer(GL_ARRAY_BUFFER, 0);
 	//glBindVertexArray(0);
 
+	free(vertices);
 	return polygonCount;
 }
 //********************************************************

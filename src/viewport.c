@@ -294,6 +294,8 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 	meshObject.pos = pos;
 	meshObject.scale = scale;
 	meshObject.rot = (Vector3d){0, 0, 0};
+
+	free(polygonArr);
 	return addObject(meshObject);
 	//Create the object
 	//Return the mesh

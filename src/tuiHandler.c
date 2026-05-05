@@ -301,7 +301,9 @@ void restoreTerminal();
 void get_terminal_size(int *rows, int *cols);
 
 void addStringToTable(char *string, StringTable *table);
+void clearStringTable(StringTable * table);
 void editStringTableEntry(char * string, int entryIndex, StringTable *table);
+void insertString(char * string, char ** pointer);
 StringTable newStringTable(char *string);
 void emptyComponentTable(ComponentTable *table);
 ComponentTable newComponentTable(Component *cmp);
@@ -617,7 +619,8 @@ int handleTreeViewInput(Component *component, char keypress) {
       updateComponent(component, 0);
       updateComponent(viewport, 0);
       selectedObject = NULL;
-      commandHintComponent->text_properties.content = "\0";
+      //commandHintComponent->text_properties.content = "\0";
+      insertString("\0", &(commandHintComponent->text_properties.content));
       return 1;
       break;
     case '\n':
@@ -722,7 +725,7 @@ void calculateHintsObjectManager(){
         break;
     }
     sprintf(commandHint, "%s - x%.2f", commandHint, objectManagerData->scaler);
-    commandHintComponent->text_properties.content = commandHint;
+    insertString(commandHint, &(commandHintComponent->text_properties.content));
 
     //Update the text label on the actions hint
     char * actionHint = malloc(sizeof(char) * 1000);
@@ -739,22 +742,30 @@ void calculateHintsObjectManager(){
     if (objectManagerData->movementMode != 3){
       sprintf(actionHint, "%s   \e[38;2;255;0;0mws) X Axis    \e[38;2;0;255;0mad) Y Axis    \e[38;2;0;0;255mAD) Z Axis", actionHint);
     }
-    objectTreeView->actionHint = actionHint;
-    objectPropertiesComponent->actionHint = "";
+    //objectTreeView->actionHint = actionHint;
+    insertString(actionHint, &(objectTreeView->actionHint));
+    //objectPropertiesComponent->actionHint = "";
+    insertString("", &(objectPropertiesComponent->actionHint));
+    free(actionHint);
+    free(commandHint);
   }else{
-    objectTreeView->actionHint = "";
+    //objectTreeView->actionHint = "";
+    insertString("", &(objectTreeView->actionHint));
     if (objectPropertiesComponent->settings_properties.editing == 0){
-      commandHintComponent->text_properties.content = "";
-      objectPropertiesComponent->actionHint = "jk) Navigate component   \u21B5) Modify value   ESC) Exit object properties";
+      insertString("", &(commandHintComponent->text_properties.content));
+      //objectPropertiesComponent->actionHint = "jk) Navigate component   \u21B5) Modify value   ESC) Exit object properties";
+      insertString("jk) Navigate component   \u21B5) Modify value   ESC) Exit object properties", &(objectPropertiesComponent->actionHint));
     }else if(objectPropertiesComponent->settings_properties.focusElement != NULL){
       switch(objectPropertiesComponent->settings_properties.focusElement->fieldType){
         case number_s:
-          objectPropertiesComponent->actionHint = "hl) Moving   jk) Change number   ESC) Exit edition";
-          commandHintComponent->text_properties.content = "Editing Number";
+          //objectPropertiesComponent->actionHint = "hl) Moving   jk) Change number   ESC) Exit edition";
+          insertString("hl) Moving   jk) Change number   ESC) Exit edition", &(objectPropertiesComponent->actionHint));
+          insertString("Editing Number", &(commandHintComponent->text_properties.content));
           break;
         default:
-          commandHintComponent->text_properties.content = "";
-          objectPropertiesComponent->actionHint = "";
+          insertString("", &(commandHintComponent->text_properties.content));
+          //objectPropertiesComponent->actionHint = "";
+          insertString("", &(objectPropertiesComponent->actionHint));
           break;
       }
     }
@@ -765,7 +776,9 @@ void calculateHintsObjectManager(){
 void calculateCommandHintViewport(){
   char * commandHint = malloc(sizeof(char) * 100);
   sprintf(commandHint, "Moving camera - x%.2f", viewport->viewport_properties.movementScaler);
-  commandHintComponent->text_properties.content = commandHint;
+  //commandHintComponent->text_properties.content = commandHint;
+  insertString(commandHint, &(commandHintComponent->text_properties.content));
+  free(commandHint);
 }
 
 
@@ -970,7 +983,8 @@ int handleViewportInput(Component * component, char keypress){
   switch (keypress){
     case 27:
       focusComponent = NULL;
-      commandHintComponent->text_properties.content = "\0";
+      //commandHintComponent->text_properties.content = "\0";
+      insertString("\0", &(commandHintComponent->text_properties.content));
       updateComponent(component, 0);
       break;
 
@@ -1260,7 +1274,6 @@ int handleSettingsNumberFieldKeypress(Component * component, char keypress){
       }
       break;
     case 'c':
-      //TODO: Clear the content when C is pressed
       if (settings->focusElement->number_data.float_type == 0){
         settings->focusElement->number_data.int_value = 0;
       }else{
@@ -1560,6 +1573,7 @@ int main() {
     // viewport.render_settings->active_camera = myCam;
 
     drawUI();
+    usleep(5000);
     // getchar();
     // int aux = 0/0;
     // vp_render_viewport(&viewport);
@@ -1752,7 +1766,9 @@ void initUI() {
 
   parentComponent.children[5]->children[0] = child;
   viewport = child;
-  viewport->actionHint = "wasd) Move camera    WASD) Rotate Camera    +-) Change multiplier    io) Zoom In/Out";
+  //viewport->actionHint = "wasd) Move camera    WASD) Rotate Camera    +-) Change multiplier    io) Zoom In/Out";
+  insertString("wasd) Move camera    WASD) Rotate Camera    +-) Change multiplier    io) Zoom In/Out", &(viewport->actionHint));
+  insertString("", &(viewport->actionHint));
 
   /*Object Manager*/
   Component *objectContainer = parentComponent.children[3];
@@ -1802,8 +1818,10 @@ void initUI() {
   treeView->parent = tabView->children[0];
   treeView->onKeyPress = handleTreeViewInput;
   treeView->treeview_properties.highlightMode = 1;
-  treeView->actionHint = "";
-  treeView->modeHint = "t) Translate  r) Rotate  q) Scale";
+  //treeView->actionHint = "";
+  insertString("", &(treeView->actionHint));
+  //treeView->modeHint = "t) Translate  r) Rotate  q) Scale";
+  insertString("t) Translate  r) Rotate  q) Scale", &(treeView->modeHint));
   objectTreeView = treeView;
   objectManagerData = malloc(sizeof(ObjectManagerData));
   objectManagerData->movementMode = 1;
@@ -1892,8 +1910,10 @@ void initUI() {
   tabView->children[1]->autoWidth = 2;
   tabView->children[1]->border = 1;
   tabView->children[1]->backgroundColor = BG_COLOR;
-  tabView->children[1]->actionHint = "";
-  tabView->children[1]->modeHint = "";
+  //tabView->children[1]->actionHint = "";
+  insertString("", &(tabView->children[1]->actionHint));
+  //tabView->children[1]->modeHint = "";
+  insertString("", &(tabView->modeHint));
 
   /*Material tab content*/
   Component *matCont = tabView->children[1];
@@ -2544,8 +2564,8 @@ void drawTabView(Component *component, Component *parent) {
         printText(aux_x, aux_y, title, bgColor, fwColor);
         aux_x += titleLength;
         debug("Aux_x: %d", aux_x);
-        free(title);
       }
+      free(title);
 
       if (aux_x == (start_x + component->real_width - arrowLengthEnd))
         break;
@@ -2980,8 +3000,10 @@ void drawSettingsComponent(Component *component) {
       if(textComponent->text_properties.content != NULL){
         free(textComponent->text_properties.content);
       }
-      textComponent->text_properties.content = text;
+      //textComponent->text_properties.content = text;
+      insertString(text, &(textComponent->text_properties.content));
     }
+    free(text);
 
     textComponent->real_height = 1;
     textComponent->real_width = width;
@@ -3310,7 +3332,8 @@ int calculateHintMessages(Component * component, StringTable * modeHint, StringT
         sprintf(actionHintString, "%s  %s", actionHintString, actionHints.table[i]);
       }
     }
-    actionHintsComponent->text_properties.content = actionHintString;
+    //actionHintsComponent->text_properties.content = actionHintString;
+    insertString(actionHintString, &(actionHintsComponent->text_properties.content));
     debug("New Actions hint: %s", actionHintString);
 
     //Build the final string
@@ -3322,10 +3345,12 @@ int calculateHintMessages(Component * component, StringTable * modeHint, StringT
       }
     }
     if (focusComponent == NULL){
-      modeHintsComponent->text_properties.content = "1) Viewport    2) Object Manager";
+      insertString("1) Viewport    2) Object Manager", &(modeHintsComponent->text_properties.content));
+      //modeHintsComponent->text_properties.content = "1) Viewport    2) Object Manager";
     }else{
       sprintf(modeHintsString, "%s  ESC) Exit window focus", modeHintsString);
-      modeHintsComponent->text_properties.content = modeHintsString;
+      //modeHintsComponent->text_properties.content = modeHintsString;
+      insertString(modeHintsString, &(modeHintsComponent->text_properties.content));
     }
     debug("New Mode hint: %s", modeHintsString);
 
@@ -3334,6 +3359,10 @@ int calculateHintMessages(Component * component, StringTable * modeHint, StringT
     updateComponent(actionHintsComponent->parent, 1);
     updateComponent(modeHintsComponent->parent, 1);
     updateComponent(commandHintComponent->parent, 1);
+    free(actionHintString);
+    free(modeHintsString);
+    clearStringTable(&actionHints);
+    clearStringTable(&modeHints);
     return 0;
     
   }else{
@@ -4047,7 +4076,8 @@ Component *newTextComponent(char *text) {
   cmp->width = -1;
   cmp->autoWidth = 1;
   cmp->autoHeight = 1;
-  cmp->text_properties.content = text;
+  cmp->text_properties.content = NULL;
+  insertString(text, &(cmp->text_properties.content));
   cmp->text_properties.bgColor = BG_COLOR;
   cmp->text_properties.textColor = FONT_COLOR;
   cmp->text_properties.oneLine = 0;
@@ -4215,12 +4245,22 @@ void addStringToTable(char *string, StringTable *table) {
   char **auxTable = malloc(sizeof(char *) * (table->length + 1));
   memcpy(auxTable, table->table, table->length * sizeof(char *));
   free(table->table);
+
   table->table = auxTable;
   table->table[table->length] = malloc(sizeof(char) * strlen(string) + 1);
   strcpy(table->table[table->length], string);
   debug("Elemento añadido a tabla en %d: %s", table->length,
         table->table[table->length]);
   table->length++;
+}
+
+void clearStringTable(StringTable * table){
+  for (int i = 0; i < table->length; i++){
+    if (table->table[i] != NULL){
+      free(table->table[i]);
+    }
+  }
+  free(table->table);
 }
 
 
@@ -4241,6 +4281,17 @@ void editStringTableEntry(char * string, int entryIndex, StringTable *table){
 }
 
 
+/*Function that reserver memmory for a string and inserts it, freeing the pointer if filled*/
+void insertString(char * string, char ** pointer){
+  if (pointer != NULL){
+    free(*pointer);
+  }
+
+  *pointer = malloc(sizeof(char) * (strlen(string)+1));
+  memcpy(*pointer, string, strlen(string));
+  (*pointer)[strlen(string)] = '\0';
+
+}
 
 /*Function that return next treeViewElement in order, not caring about height*/
 TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
