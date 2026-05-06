@@ -118,6 +118,12 @@ typedef struct CheckSetting{
   int triState;
 } CheckSetting;
 
+typedef struct ListSetting{
+  int selectedIndex;
+  StringTable entries;
+  char * hintMessage;
+} ListSetting;
+
 typedef struct SettingsElement {
   struct SettingsElement *previousElement;
   struct SettingsElement *nextElement;
@@ -126,6 +132,7 @@ typedef struct SettingsElement {
     NumberSetting number_data;
     LineTextSetting line_text_data;
     CheckSetting check_data;
+    ListSetting list_data;
   };
   char * title;
   void * textComponent;
@@ -254,6 +261,7 @@ void drawSettingsComponent(Component *component);
 void drawNumberInputSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
 void drawLineTextSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
 void drawCheckSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow);
+void drawListSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
 void printText(int x, int y, char *text, Color bg, Color fg);
 void updateComponent(Component *component, int resize);
 void markComponentResized(Component *component);
@@ -281,6 +289,7 @@ SettingsElement * newSettingsTitleElement(char * content, SettingsElement * prev
 SettingsElement * newSettingsNumberInput(char * title, int isFloat, SettingsElement * prevElement, SettingsElement * nextElement);
 SettingsElement * newSettingsLineText(char * title, int textSize, SettingsElement * prevElement, SettingsElement * nextElement);
 SettingsElement * newSettingsCheck(char * title, int triState, SettingsElement * prevElement, SettingsElement * nextElement);
+SettingsElement * newSettingsList(char * title, char * hintMessage, SettingsElement * prevElement, SettingsElement * nextElement);
 Color *newColor(uint8_t r, uint8_t g, uint8_t b);
 
 int handleInput();
@@ -1862,6 +1871,19 @@ void initUI() {
   settingElement = newSettingsNumberInput("z", 1, settingElement, NULL);
   settingElement = newSettingsTitleElement("", settingElement, NULL);
   settingElement = newSettingsCheck("Visible", 0, settingElement, NULL);
+  settingElement = newSettingsList("TestHint", "This is a Hint", settingElement, NULL);
+  debug("Entries %d", settingElement->list_data.entries);
+  debug("Entries length %d", settingElement->list_data.entries.length);
+  addStringToTable("Option 1", &(settingElement->list_data.entries));
+  debug("Entries %d", settingElement->list_data.entries);
+  debug("Entries length %d", settingElement->list_data.entries.length);
+  addStringToTable("Option 2", &(settingElement->list_data.entries));
+  debug("Entries %d", settingElement->list_data.entries);
+  debug("Entries length %d", settingElement->list_data.entries.length);
+  settingElement = newSettingsList("TestNoHint", NULL, settingElement, NULL);
+  addStringToTable("Option A", &(settingElement->list_data.entries));
+  addStringToTable("Option 2", &(settingElement->list_data.entries));
+
   /*
   TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
   treeView->treeview_properties.child = treeViewElem;
@@ -3039,6 +3061,11 @@ void drawSettingsComponent(Component *component) {
 
       case check_s:
         drawCheckSetting(component, currentRowElement, globalX, globalY, localRow);
+        break;
+
+      case list_s:
+        drawListSetting(component, currentRowElement, globalX, globalY, localRow, editing);
+        break;
 
       default:
         break;
@@ -3124,6 +3151,95 @@ void drawCheckSetting(Component * component, SettingsElement * currentRowElement
       component->settings_properties.colors[4], 
       component->settings_properties.colors[5]
       );
+}
+
+void drawListSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing){
+  debug("Drawing list settings");
+  debug("Current Index %d", currentRowElement->list_data.selectedIndex);
+  debug("Entries %d", currentRowElement->list_data.entries.length);
+  debug("Hint %s", currentRowElement->list_data.hintMessage);
+  ListSetting * listSettings = &(currentRowElement->list_data);
+  char * dropDownIcon = "";
+  int dropDownIconLenght = strlen(dropDownIcon);
+
+  int start = strlen(currentRowElement->title)+1+globalX;
+  int end = 0;
+  for (int i = 0; i<listSettings->entries.length; i++){
+    debug("Entry %d: %s", i, listSettings->entries.table[i]);
+    int auxLength = strlen(listSettings->entries.table[i])+1;
+    if (auxLength > end){
+      end = auxLength;
+    }
+  }
+  if (listSettings->hintMessage != NULL){
+    int auxLength = strlen(listSettings->hintMessage)+1;
+    if (auxLength > end){
+      end = auxLength;
+    }
+  }
+  end += start +1;
+
+  if (end > (component->global_x + component->real_width)){
+    end = component->global_x + component->real_width;
+  }
+  int realInputWidth = end - start;
+
+  char * printBuffer; 
+  if (!editing){
+    char * textToShow;
+    printBuffer = malloc(sizeof(char) * realInputWidth+1);
+    //printBuffer[realInputWidth] = '\0';
+    //No editing, show current element or hint
+    if (listSettings->hintMessage == NULL){
+      if (listSettings->selectedIndex == -1){
+        listSettings->selectedIndex = 0;
+      }
+      textToShow = listSettings->entries.table[listSettings->selectedIndex];
+    }else{
+      textToShow = listSettings->hintMessage;
+    }
+
+    int textToShowLength = strlen(textToShow);
+    if (textToShowLength > (realInputWidth-2)){
+      textToShowLength = realInputWidth -2;
+    }
+    memcpy(printBuffer, textToShow, textToShowLength);
+
+    char *auxBuffer;
+    //Print the string
+    Color textColor = component->settings_properties.colors[1];
+    if (listSettings->selectedIndex == -1){
+      textColor = component->settings_properties.colors[5];
+    }
+    printText(start+1,
+      globalY + localRow+1,
+      printBuffer,
+      component->settings_properties.colors[4], 
+      textColor
+    );
+
+    if (textToShowLength < strlen(textToShow)){
+      auxBuffer = "…";
+    }else{
+      auxBuffer = " ";
+    }
+    printText(start+1+textToShowLength,
+      globalY + localRow+1,
+      auxBuffer,
+      component->settings_properties.colors[4], 
+      component->settings_properties.colors[5]
+    );
+
+    //Print the icon
+    printText(start + 1 + textToShowLength+1,
+        globalY + localRow +1,
+        dropDownIcon,
+        component->settings_properties.colors[0],
+        component->settings_properties.colors[1]
+    );
+  }
+
+  free(printBuffer);
 }
 
 void drawNumberInputSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing){
@@ -4211,20 +4327,42 @@ SettingsElement * newSettingsCheck(char * title, int triState, SettingsElement *
 
   return element;
 }
+
+SettingsElement * newSettingsList(char * title, char * hintMessage, SettingsElement * prevElement, SettingsElement * nextElement){
+  SettingsElement * element = newSettingsElement(title, prevElement, nextElement);
+  element->fieldType = list_s;
+  element->list_data.entries = newStringTable(NULL);
+  element->list_data.hintMessage = NULL;
+  if(hintMessage != NULL){
+    insertString(hintMessage, &(element->list_data.hintMessage));
+  }
+  // If no hint, on render, the selected element will be 0, else, a hint will show
+  element->list_data.selectedIndex = -1;
+
+  return element;
+}
 /*Creates new color based on an Hex string*/
 Color *newColor(uint8_t r, uint8_t g, uint8_t b) {
   Color *retPtr = malloc(sizeof(Color));
+  retPtr->r = r;
+  retPtr->g = g;
+  retPtr->b = b;
   return retPtr;
 }
 
 /*Function that creates a new table of strings*/
 StringTable newStringTable(char *string) {
   StringTable retTable;
-  retTable.table = malloc(sizeof(char *));
-  retTable.table[0] = malloc(sizeof(char) * strlen(string) + 1);
-  retTable.length = 1;
-  strcpy(retTable.table[0], string);
-  debug("Nueva tabla con elemento: %s", retTable.table[0]);
+  if (string == NULL){
+    retTable.table = NULL;
+    retTable.length = 0;
+  }else{
+    retTable.table = malloc(sizeof(char *));
+    retTable.table[0] = malloc(sizeof(char) * strlen(string) + 1);
+    retTable.length = 1;
+    strcpy(retTable.table[0], string);
+    debug("Nueva tabla con elemento: %s", retTable.table[0]);
+  }
   return retTable;
 }
 
@@ -4243,8 +4381,10 @@ ComponentTable newComponentTable(Component *cmp) {
 /*Function that adds a new string to a table of strings*/
 void addStringToTable(char *string, StringTable *table) {
   char **auxTable = malloc(sizeof(char *) * (table->length + 1));
-  memcpy(auxTable, table->table, table->length * sizeof(char *));
-  free(table->table);
+  if (table->table != NULL){
+    memcpy(auxTable, table->table, table->length * sizeof(char *));
+    free(table->table);
+  }
 
   table->table = auxTable;
   table->table[table->length] = malloc(sizeof(char) * strlen(string) + 1);
