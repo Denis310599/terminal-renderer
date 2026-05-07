@@ -299,6 +299,7 @@ int handleTreeViewInput(Component *component, char keypress);
 int handleSettingInput(Component *component, char keypress);
 int handleSettingsNumberFieldKeypress(Component * component, char keypress);
 int handleSettingsLineTextKeypress(Component * component, char keypress);
+int handleSettingsListKeypress(Component * component, char keypress);
 void handleObjectPropertiesUpdate(int position, SettingsElement * settingElement);
 void closeProgram();
 
@@ -1121,6 +1122,9 @@ int handleSettingInput(Component *component, char keypress) {
       case line_text_s:
         keyHandled = handleSettingsLineTextKeypress(component, keypress);
         break;
+      case list_s:
+        keyHandled = handleSettingsListKeypress(component, keypress);
+        break;
       default:
         keyHandled = 0;
         break;
@@ -1330,6 +1334,7 @@ int handleSettingsNumberFieldKeypress(Component * component, char keypress){
 }
 
 
+
 int handleSettingsLineTextKeypress(Component * component, char keypress){
   Settings * cmpSettings = &component->settings_properties;
   LineTextSetting * lineSettings = &cmpSettings->focusElement->line_text_data;
@@ -1488,6 +1493,35 @@ int handleSettingsCheckKeypress(Component * component, char keypress){
   }
   return keyHandled;
 }
+
+int handleSettingsListKeypress(Component * component, char keypress){
+  Settings * cmpSettings = &component->settings_properties;
+  ListSetting * listSettings = &cmpSettings->focusElement->list_data;
+  int keyHandled = 1;
+  switch(keypress){
+    case 'j':
+      listSettings->selectedIndex++;
+      if (listSettings->entries.length <= listSettings->selectedIndex){
+        listSettings->selectedIndex--;
+      }
+    break;
+    case 'k':
+      listSettings->selectedIndex--;
+      if (0 > listSettings->selectedIndex){
+        listSettings->selectedIndex = 0;
+      }
+    break;
+    case 27:
+      cmpSettings->editing = 0;
+      break;
+    default:
+      keyHandled = 0;
+      break;
+  }
+  
+  return keyHandled;
+}
+
 /*Function that imports a new object to the scene
  * uri: path to the object
  * format: 0 stl*/
@@ -1871,18 +1905,6 @@ void initUI() {
   settingElement = newSettingsNumberInput("z", 1, settingElement, NULL);
   settingElement = newSettingsTitleElement("", settingElement, NULL);
   settingElement = newSettingsCheck("Visible", 0, settingElement, NULL);
-  settingElement = newSettingsList("TestHint", "This is a Hint", settingElement, NULL);
-  debug("Entries %d", settingElement->list_data.entries);
-  debug("Entries length %d", settingElement->list_data.entries.length);
-  addStringToTable("Option 1", &(settingElement->list_data.entries));
-  debug("Entries %d", settingElement->list_data.entries);
-  debug("Entries length %d", settingElement->list_data.entries.length);
-  addStringToTable("Option 2", &(settingElement->list_data.entries));
-  debug("Entries %d", settingElement->list_data.entries);
-  debug("Entries length %d", settingElement->list_data.entries.length);
-  settingElement = newSettingsList("TestNoHint", NULL, settingElement, NULL);
-  addStringToTable("Option A", &(settingElement->list_data.entries));
-  addStringToTable("Option 2", &(settingElement->list_data.entries));
 
   /*
   TreeViewElement *treeViewElem = newTreeViewElement(NULL, 0);
@@ -3159,7 +3181,7 @@ void drawListSetting(Component * component, SettingsElement * currentRowElement,
   debug("Entries %d", currentRowElement->list_data.entries.length);
   debug("Hint %s", currentRowElement->list_data.hintMessage);
   ListSetting * listSettings = &(currentRowElement->list_data);
-  char * dropDownIcon = "";
+  char * dropDownIcon = "󰹹";
   int dropDownIconLenght = strlen(dropDownIcon);
 
   int start = strlen(currentRowElement->title)+1+globalX;
@@ -3185,10 +3207,10 @@ void drawListSetting(Component * component, SettingsElement * currentRowElement,
   int realInputWidth = end - start;
 
   char * printBuffer; 
-  if (!editing){
+  if (!editing || editing){
     char * textToShow;
     printBuffer = malloc(sizeof(char) * realInputWidth+1);
-    //printBuffer[realInputWidth] = '\0';
+    printBuffer[realInputWidth] = '\0';
     //No editing, show current element or hint
     if (listSettings->hintMessage == NULL){
       if (listSettings->selectedIndex == -1){
@@ -3196,7 +3218,11 @@ void drawListSetting(Component * component, SettingsElement * currentRowElement,
       }
       textToShow = listSettings->entries.table[listSettings->selectedIndex];
     }else{
-      textToShow = listSettings->hintMessage;
+      if (listSettings->selectedIndex == -1){
+        textToShow = listSettings->hintMessage;
+      }else{
+        textToShow = listSettings->entries.table[listSettings->selectedIndex];
+      }
     }
 
     int textToShowLength = strlen(textToShow);
@@ -3208,13 +3234,17 @@ void drawListSetting(Component * component, SettingsElement * currentRowElement,
     char *auxBuffer;
     //Print the string
     Color textColor = component->settings_properties.colors[1];
+    Color bgColor = component->settings_properties.colors[4];
     if (listSettings->selectedIndex == -1){
       textColor = component->settings_properties.colors[5];
+    }
+    if (editing){
+      bgColor = component->settings_properties.colors[0];
     }
     printText(start+1,
       globalY + localRow+1,
       printBuffer,
-      component->settings_properties.colors[4], 
+      bgColor, 
       textColor
     );
 
@@ -3226,8 +3256,8 @@ void drawListSetting(Component * component, SettingsElement * currentRowElement,
     printText(start+1+textToShowLength,
       globalY + localRow+1,
       auxBuffer,
-      component->settings_properties.colors[4], 
-      component->settings_properties.colors[5]
+      bgColor,
+      textColor
     );
 
     //Print the icon
