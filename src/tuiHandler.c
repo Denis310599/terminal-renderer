@@ -331,6 +331,7 @@ int handleObjectManajerKeyPress(Component *component, char keypress);
 void handleSelectedObjectAction(char keypress, float scaler);
 int handleViewportInput(Component * component, char keypress);
 void calculateHintsObjectManager();
+void calculateHintSettingsWidget(Component * settingsComponent);
 void calculateCommnandHintViewport();
 
 /*Color deffinitions*/
@@ -761,26 +762,37 @@ void calculateHintsObjectManager(){
   }else{
     //objectTreeView->actionHint = "";
     insertString("", &(objectTreeView->actionHint));
-    if (objectPropertiesComponent->settings_properties.editing == 0){
-      insertString("", &(commandHintComponent->text_properties.content));
-      //objectPropertiesComponent->actionHint = "jk) Navigate component   \u21B5) Modify value   ESC) Exit object properties";
-      insertString("jk) Navigate component   \u21B5) Modify value   ESC) Exit object properties", &(objectPropertiesComponent->actionHint));
-    }else if(objectPropertiesComponent->settings_properties.focusElement != NULL){
-      switch(objectPropertiesComponent->settings_properties.focusElement->fieldType){
-        case number_s:
-          //objectPropertiesComponent->actionHint = "hl) Moving   jk) Change number   ESC) Exit edition";
-          insertString("hl) Moving   jk) Change number   ESC) Exit edition", &(objectPropertiesComponent->actionHint));
-          insertString("Editing Number", &(commandHintComponent->text_properties.content));
-          break;
-        default:
-          insertString("", &(commandHintComponent->text_properties.content));
-          //objectPropertiesComponent->actionHint = "";
-          insertString("", &(objectPropertiesComponent->actionHint));
-          break;
-      }
-    }
-
+    calculateHintSettingsWidget(objectPropertiesComponent);
   }
+}
+
+void calculateHintSettingsWidget(Component * settings){
+  Settings * settingsComponent = &settings->settings_properties;
+  if (!settingsComponent->editing){
+    insertString("jk) Navigate component   \u21B5) Modify value   ESC) Exit", &(settings->actionHint));
+    insertString("", &(commandHintComponent->text_properties.content));
+    return;
+  }
+
+  insertString("Editing field...", &(commandHintComponent->text_properties.content));
+  char * buffer;
+  switch(settingsComponent->focusElement->fieldType){
+    case number_s:
+      buffer = "hl) Moving   jk) Change number   0..9) Insert number   ESC) Exit edition";
+      break;
+    case line_text_s:
+      buffer = "󰁍󰁔) Move cursor   ESC) Exit edition";
+      break;
+    case check_s:
+      break;
+    case list_s:
+      buffer = "jk) Change selection   ESC) Exit edition";
+      break;
+    default:
+      buffer = "";
+      break;
+  }
+    insertString(buffer, &(settings->actionHint));
 }
 
 void calculateCommandHintViewport(){
