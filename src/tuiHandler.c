@@ -219,6 +219,9 @@ typedef struct Component {
   // Function handlers
   int (*onKeyPress)(struct Component *, char keypress);
 
+  struct Component *parent;
+  struct Component **children;
+
   //Hint
   char * modeHint;
   char * actionHint;
@@ -238,12 +241,11 @@ typedef struct Component {
     Settings settings_properties;
   };
   int childCount;
-  struct Component *parent;
-  struct Component **children;
-
   // Print buffers
-  char * printBuffer;
-  int printBufferSize;
+  char ** printBuffer;
+  long printBufferSize;
+  long writtenBufferSize;
+
 } Component;
 
 typedef struct ComponentTable {
@@ -257,7 +259,7 @@ void drawUI();
 void drawContainer(Component *component, Component *parent);
 void drawComponent(Component *component, Component *parent);
 void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
-             Color borderColor, char ** printBuffer, int * printBufferSize);
+             Color borderColor, Component * component);
 void drawViewport(Component *component, Component *parent);
 void drawTabView(Component *component, Component *parent);
 void drawTextComponent(Component *component);
@@ -267,7 +269,7 @@ void drawNumberInputSetting(Component * component, SettingsElement * currentRowE
 void drawLineTextSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
 void drawCheckSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow);
 void drawListSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
-void printText(int x, int y, char *text, Color bg, Color fg, char ** printBuffer, int * printBufferSize);
+void printText(int x, int y, char *text, Color bg, Color fg, Component * component);
 void updateComponent(Component *component, int resize);
 void markComponentResized(Component *component);
 void markComponentUpdated(Component *component);
@@ -321,7 +323,9 @@ void editStringTableEntry(char * string, int entryIndex, StringTable *table);
 void insertString(char * string, char ** pointer);
 StringTable newStringTable(char *string);
 void emptyComponentTable(ComponentTable *table);
-void appendToPrintBuffer(char ** printBuffer, int * printBufferSize, char * string, ...);
+void appendToPrintBuffer(Component * component, char * string, ...);
+void clearPrintBuffer(Component * printBuffer);
+void printBuffer(Component * component);
 ComponentTable newComponentTable(Component *cmp);
 void addComponentToTable(Component *component, ComponentTable *table);
 TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
@@ -355,6 +359,7 @@ const Color FONT_COLOR_HIGHLIGHT = (Color){200, 200, 200};
 const Color BG_VP_COLOR = (Color){60, 60, 60};
 
 /*Variable deffinitions*/
+int redrawBuffers = 1;
 Component parentComponent;
 Component *focusComponent;
 ComponentTable cmpsToUpdate;
@@ -581,7 +586,7 @@ int handleTreeViewInput(Component *component, char keypress) {
       }
     case 'r':
       objectManagerData->movementMode = 2;
-      addComponentToTable(viewport, &cmpsToUpdate);
+      updateComponent(viewport, 0);
       break;
     case 'n':
       //New object
@@ -590,11 +595,11 @@ int handleTreeViewInput(Component *component, char keypress) {
       break;
     case 't':
       objectManagerData->movementMode = 1;
-      addComponentToTable(viewport, &cmpsToUpdate);
+      updateComponent(viewport, 0);
       break;
     case 'q':
       objectManagerData->movementMode = 3;
-      addComponentToTable(viewport, &cmpsToUpdate);
+      updateComponent(viewport, 0);
       break;
     case 'f':
       //if (objectManagerData->movementMode == 3)
@@ -627,7 +632,7 @@ int handleTreeViewInput(Component *component, char keypress) {
       selectedTreeElem = selectedCmp->treeview_properties.selectedElement;
       selectedObject = (Object *) selectedTreeElem->data;
       handleSelectedObjectAction(keypress, scaler);
-      addComponentToTable(viewport, &cmpsToUpdate);
+      updateComponent(viewport, 0);
       break;
     case 27:
       focusComponent = NULL;
@@ -711,7 +716,7 @@ int handleTreeViewInput(Component *component, char keypress) {
   selectedTreeElem = component->treeview_properties.selectedElement;
   if (objectManagerData->lastSelectedElement != selectedTreeElem){
     objectManagerData->lastSelectedElement = selectedTreeElem;
-    addComponentToTable(viewport, &cmpsToUpdate);
+    updateComponent(viewport, 0);
   }
   if (selectedTreeElem != NULL){
     selectedObject = (Object *) selectedTreeElem->data;
@@ -1059,7 +1064,7 @@ int handleViewportInput(Component * component, char keypress){
           (int)(viewport->viewport_properties.vp_settings->screen_width/2),
           (int)(viewport->viewport_properties.vp_settings->screen_height/2),
           viewport->viewport_properties.vp_settings);
-      addComponentToTable(viewport, &cmpsToUpdate);
+      updateComponent(viewport, 0);
       break;
 
     case '+':
@@ -1115,7 +1120,7 @@ int handleViewportInput(Component * component, char keypress){
       //Update the camera
       viewport->viewport_properties.vp_settings->render_settings->active_camera = myCam;
       debug("New camera coords: %.2f, %.2f, %.2f", myCam.pos.x, myCam.pos.y, myCam.pos.z);
-      addComponentToTable(viewport, &cmpsToUpdate);
+      updateComponent(viewport, 0);
       break;
     default:
       inputHandled = 0;
@@ -2225,7 +2230,8 @@ void handle_resize(int a) {
 }
 
 void updateComponent(Component *component, int resize) {
-  if (resize) {
+  redrawBuffers = 1;
+  if (resize == 1) {
     markComponentResized(&parentComponent);
   }
   markComponentUpdated(component);
@@ -2386,6 +2392,7 @@ void drawContainer(Component *component, Component *parent) {
         component, component->x, component->y, component->real_height,
         component->real_width);
   if (component->isUpdated != 0) {
+    clearPrintBuffer(component);
     component->isUpdated--;
     // Draws the border
     if (component == &parentComponent) {
@@ -2394,19 +2401,17 @@ void drawContainer(Component *component, Component *parent) {
       drawBox(component->x, component->y, component->real_height,
               component->real_width, component->border,
               component->backgroundColor, (Color){},
-              &(component->printBuffer),
-              &(component->printBufferSize));
+              component);
     } else if (parent != NULL) {
       component->global_x = component->x + parent->global_x;
       component->global_y = component->y + parent->global_y;
       drawBox(component->global_x, component->global_y, component->real_height,
               component->real_width, component->border,
               component->backgroundColor, (Color){},
-              &(component->printBuffer),
-              &(component->printBufferSize));
+              component);
     }
   }
-  printf("%s", component->printBuffer);
+  printBuffer(component);
   // Iterates over every child component
   for (int i = 0; i < component->childCount; i++) {
     drawComponent(component->children[i], component);
@@ -2414,7 +2419,7 @@ void drawContainer(Component *component, Component *parent) {
 }
 
 void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
-             Color borderColor, char ** printBuffer, int * printBufferSize) {
+             Color borderColor, Component * component) {
   int true_x = x + 1;
   int true_y = y + 1;
   int true_end_x = x + width;
@@ -2433,55 +2438,59 @@ void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
     true_end_y = max_y;
 
   // Position cursor to start
-  appendToPrintBuffer(printBuffer, printBufferSize, "\033[%d;%dH", true_y, true_x);
+  appendToPrintBuffer(component, "\033[%d;%dH", true_y, true_x);
+  appendToPrintBuffer(component, "\e[48;2;%d;%d;%dm", bgColor.r, bgColor.g, bgColor.b);
   //fflush(stdout);
   for (int y_iter = true_y; y_iter <= true_end_y; y_iter++) {
     for (int x_iter = true_x; x_iter <= true_end_x; x_iter++) {
       // if(y_iter == true_y) printf("%s", ".");
       if (drawBorder == 1) {
         if (x_iter == true_x && y_iter == true_y) {
-          appendToPrintBuffer(printBuffer, printBufferSize, "\e[48;2;%d;%d;%dm%s", bgColor.r, bgColor.g, bgColor.b, "╭");
+          appendToPrintBuffer(component, "╭");
           //fflush(stdout);
         } else if (x_iter == true_x && y_iter == true_end_y) {
-          appendToPrintBuffer(printBuffer, printBufferSize, "\e[48;2;%d;%d;%dm%s", bgColor.r, bgColor.g, bgColor.b, "╰");
+          appendToPrintBuffer(component, "╰");
           //fflush(stdout);
         } else if (x_iter == true_end_x && y_iter == true_y) {
-          appendToPrintBuffer(printBuffer, printBufferSize, "\e[48;2;%d;%d;%dm%s", bgColor.r, bgColor.g, bgColor.b, "╮");
+          appendToPrintBuffer(component, "╮");
           //fflush(stdout);
         } else if (x_iter == true_end_x && y_iter == true_end_y) {
-          appendToPrintBuffer(printBuffer, printBufferSize, "\e[48;2;%d;%d;%dm%s", bgColor.r, bgColor.g, bgColor.b, "╯");
+          appendToPrintBuffer(component, "╯");
           //fflush(stdout);
         } else if (y_iter == true_y || y_iter == true_end_y) {
-          appendToPrintBuffer(printBuffer, printBufferSize, "\e[48;2;%d;%d;%dm%s", bgColor.r, bgColor.g, bgColor.b, "─");
+          appendToPrintBuffer(component, "─");
           //fflush(stdout);
         } else if (x_iter == true_x || x_iter == true_end_x) {
-          appendToPrintBuffer(printBuffer, printBufferSize, "\e[48;2;%d;%d;%dm%s", bgColor.r, bgColor.g, bgColor.b, "│");
+          appendToPrintBuffer(component, "│");
           //fflush(stdout);
         } else {
-          appendToPrintBuffer(printBuffer, printBufferSize, "\e[48;2;%d;%d;%dm%s", bgColor.r, bgColor.g, bgColor.b, " ");
+          appendToPrintBuffer(component, " ");
           //fflush(stdout);
         }
       } else {
-        appendToPrintBuffer(printBuffer, printBufferSize, "\e[48;2;%d;%d;%dm%s", bgColor.r, bgColor.g, bgColor.b, " ");
+        appendToPrintBuffer(component, " ");
         //fflush(stdout);
       }
     }
-    appendToPrintBuffer(printBuffer, printBufferSize, "\033[%d;%dH", y_iter + 1, true_x);
+    appendToPrintBuffer(component, "\033[%d;%dH", y_iter + 1, true_x);
     //fflush(stdout);
   }
 }
 
 /*Function that prints some text with color at a desired position*/
-void printText(int x, int y, char *text, Color bg, Color fg, char ** printBuffer, int * printBufferSize) {
+void printText(int x, int y, char *text, Color bg, Color fg, Component * component) {
   // printf("\033[%d;%dH", y, x);
-  appendToPrintBuffer(printBuffer, printBufferSize, "\033[%d;%dH\e[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", y, x, fg.r, fg.g, fg.b,
+  appendToPrintBuffer(component, "\033[%d;%dH\e[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", y, x, fg.r, fg.g, fg.b,
          bg.r, bg.g, bg.b, text);
   //fflush(stdout);
 }
 
 void drawViewport(Component *component, Component *parent) {
 
-  if (component->isUpdated != 0) {
+  int updated = 0;
+  if (component->isUpdated > 0) {
+    updated = 1;
+    //clearPrintBuffer(component);
     component->isUpdated--;
     // Get the terminal cell size
     debug("Calculating viewport size");
@@ -2503,29 +2512,32 @@ void drawViewport(Component *component, Component *parent) {
         component->viewport_properties.vp_settings->screen_height;
     component->viewport_properties.vp_settings->render_settings->screen_width =
         component->viewport_properties.vp_settings->screen_width;
+  }
 
-    if (component->viewport_properties.vp_settings->window != NULL) {
-      resizeWindow(component->viewport_properties.vp_settings);
+  if (component->viewport_properties.vp_settings->window != NULL) {
+    resizeWindow(component->viewport_properties.vp_settings);
+  }
+
+  debug("Viewport Size: %d x; %d y",
+        component->viewport_properties.vp_settings->screen_width,
+        component->viewport_properties.vp_settings->screen_height);
+
+  if (updated){
+    //printBuffer(component);
+    if (component->viewport_properties.vp_settings->window == NULL) {
+      debug("Initializing viewport");
+      vp_init_viewport(component->viewport_properties.vp_settings);
     }
 
-    debug("Viewport Size: %d x; %d y",
-          component->viewport_properties.vp_settings->screen_width,
-          component->viewport_properties.vp_settings->screen_height);
+    debug("Drawing viewport");
+    debug("%dx, %dy", component->viewport_properties.vp_settings->x,
+          component->viewport_properties.vp_settings->y);
+    Camera myCam = component->viewport_properties.vp_settings->render_settings->active_camera;
+    debug("Camera direction: %f, %f, %f", myCam.dir.x, myCam.dir.y, myCam.dir.z);
+
+    vp_render_viewport(component->viewport_properties.vp_settings);
+    vp_render_viewport(component->viewport_properties.vp_settings);
   }
-
-  printf("%s", component->printBuffer);
-
-  if (component->viewport_properties.vp_settings->window == NULL) {
-    debug("Initializing viewport");
-    vp_init_viewport(component->viewport_properties.vp_settings);
-  }
-
-  debug("Drawing viewport");
-  debug("%dx, %dy", component->viewport_properties.vp_settings->x,
-        component->viewport_properties.vp_settings->y);
-  Camera myCam = component->viewport_properties.vp_settings->render_settings->active_camera;
-  debug("Camera direction: %f, %f, %f", myCam.dir.x, myCam.dir.y, myCam.dir.z);
-  vp_render_viewport(component->viewport_properties.vp_settings);
 }
 
 /*Function that handles the drawing of a tabview*/
@@ -2533,6 +2545,7 @@ void drawTabView(Component *component, Component *parent) {
   // TODO: Handle tab Height
   debug("***Drawing tabview***");
   if (component->isUpdated != 0) {
+    clearPrintBuffer(component);
     component->isUpdated--;
     /*Draws the actual tabs*/
     // Update the global coordinates
@@ -2577,8 +2590,7 @@ void drawTabView(Component *component, Component *parent) {
     printText(aux_x, aux_y, component->tabview_properties.iconStart,
               component->tabview_properties.bgColor,
               component->tabview_properties.txtColor,
-              &component->printBuffer,
-              &component->printBufferSize);
+              component);
     aux_x += strlen(component->tabview_properties.iconStart);
 
     // Draw the actual tabs
@@ -2632,8 +2644,7 @@ void drawTabView(Component *component, Component *parent) {
         debug(".. Drawing tab %s at %d %d",
               component->tabview_properties.tabTitles.table[i], aux_x, aux_y);
         printText(aux_x, aux_y, title, bgColor, fwColor,
-                  &component->printBuffer,
-                  &component->printBufferSize);
+                  component);
         aux_x += titleLength;
         debug("Aux_x: %d", aux_x);
       }
@@ -2648,8 +2659,7 @@ void drawTabView(Component *component, Component *parent) {
     for (int i = 0; i < leftTabToDraw; i++) {
       printText(aux_x, start_y, " ", component->tabview_properties.bgColor,
                 component->tabview_properties.txtColor,
-                &component->printBuffer,
-                &component->printBufferSize);
+                component);
       aux_x++;
     }
 
@@ -2658,11 +2668,10 @@ void drawTabView(Component *component, Component *parent) {
     printText(aux_x, aux_y, component->tabview_properties.iconEnd,
               component->tabview_properties.bgColor,
               component->tabview_properties.txtColor,
-              &component->printBuffer,
-              &component->printBufferSize);
+              component);
   }
 
-  printf("%s", component->printBuffer);
+  printBuffer(component);
   // Draws the component of the selected tab
   if (component->tabview_properties.selectedTab >= component->childCount)
     return;
@@ -2674,6 +2683,7 @@ void drawTabView(Component *component, Component *parent) {
 void drawTextComponent(Component *component) {
   debug("Drawing text component");
   if (component->isUpdated != 0) {
+    clearPrintBuffer(component);
     component->isUpdated--;
     debug("Printing text %s in text of size %dx %dy. Len: %d",
           component->text_properties.content, component->real_width,
@@ -2825,8 +2835,7 @@ void drawTextComponent(Component *component) {
         printText(component->global_x + 1, component->global_y + line_index + 1,
                   finalString + init_line, component->text_properties.bgColor,
                   component->text_properties.textColor,
-                  &component->printBuffer,
-                  &component->printBufferSize);
+                  component);
         init_line = i + 1;
         line_index++;
       }
@@ -2837,7 +2846,7 @@ void drawTextComponent(Component *component) {
     free(currentColor);
   }
 
-  printf("%s", component->printBuffer);
+  printBuffer(component);
 
   for (int i = 0; i < component->childCount; i++) {
     if (component->children[i] != NULL) {
@@ -2852,9 +2861,10 @@ void drawTreeView(Component *component) {
   debug("\n\n*** Drawing treeViewElement at %dx %dy ***	\n", component->x,
         component->y);
   if (component->isUpdated == 0){
-    printf("%s", component->printBuffer);
+    printBuffer(component);
     return;
   }
+  clearPrintBuffer(component);
   component->isUpdated--;
   preCalculateTreeViewComponent(component);
 
@@ -2994,8 +3004,7 @@ void drawTreeView(Component *component) {
               (highlightContext > 0 && i == (hierarchyLevel - highlightContext))
                   ? component->treeview_properties.colors[1]
                   : textElement->text_properties.textColor,
-                  &component->printBuffer,
-                  &component->printBufferSize);
+                  component);
         }
 
         textElement->x = 3 * hierarchyLevel;
@@ -3046,16 +3055,17 @@ void drawTreeView(Component *component) {
     }
   }
 
-  printf("%s", component->printBuffer);
+  printBuffer(component);
 
   free(stringToPrint);
 }
 
 void drawSettingsComponent(Component *component) {
   if (component->isUpdated == 0){
-    printf("%s", component->printBuffer);
+    printBuffer(component);
     return;
   }
+  clearPrintBuffer(component);
   SettingsElement * currentRowElement = component->settings_properties.child;
   int localRow = 0;
   component->global_y = component->parent->global_y;
@@ -3084,6 +3094,7 @@ void drawSettingsComponent(Component *component) {
     memset(text, ' ', width);
     text[width] = '\0';
     sprintf(text, "%s", currentRowElement->title);
+    fflush(stdout);
     text[text_len] = ' ';
     if (textComponent == NULL){
       textComponent = newTextComponent(text);
@@ -3143,7 +3154,7 @@ void drawSettingsComponent(Component *component) {
     currentRowElement = currentRowElement->nextElement;
     localRow++;
   }
-  printf("%s", component->printBuffer);
+  printBuffer(component);
 }
 
 void drawLineTextSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing){
@@ -3178,8 +3189,7 @@ void drawLineTextSetting(Component * component, SettingsElement * currentRowElem
       printBuffer,
       component->settings_properties.colors[4], 
       component->settings_properties.colors[5],
-      &component->printBuffer,
-      &component->printBufferSize
+      component
       );
 
   //Add the cursor if editing
@@ -3194,8 +3204,7 @@ void drawLineTextSetting(Component * component, SettingsElement * currentRowElem
           hightlightChar,
           component->settings_properties.colors[0], 
           component->settings_properties.colors[1],
-          &component->printBuffer,
-          &component->printBufferSize
+          component
           );
     }
     free(hightlightChar);
@@ -3225,8 +3234,7 @@ void drawCheckSetting(Component * component, SettingsElement * currentRowElement
       printBuffer,
       component->settings_properties.colors[4], 
       component->settings_properties.colors[5],
-      &component->printBuffer,
-      &component->printBufferSize
+      component
       );
 }
 
@@ -3301,8 +3309,7 @@ void drawListSetting(Component * component, SettingsElement * currentRowElement,
       printBuffer,
       bgColor, 
       textColor,
-      &component->printBuffer,
-      &component->printBufferSize
+      component
     );
 
     if (textToShowLength < strlen(textToShow)){
@@ -3315,8 +3322,7 @@ void drawListSetting(Component * component, SettingsElement * currentRowElement,
       auxBuffer,
       bgColor,
       textColor,
-      &component->printBuffer,
-      &component->printBufferSize
+      component
     );
 
     //Print the icon
@@ -3325,8 +3331,7 @@ void drawListSetting(Component * component, SettingsElement * currentRowElement,
         dropDownIcon,
         component->settings_properties.colors[0],
         component->settings_properties.colors[1],
-        &component->printBuffer,
-        &component->printBufferSize
+        component
     );
   }
 
@@ -3409,8 +3414,7 @@ void drawNumberInputSetting(Component * component, SettingsElement * currentRowE
         finalStringBufffer,
         component->settings_properties.colors[4], 
         component->settings_properties.colors[5],
-        &component->printBuffer,
-        &component->printBufferSize
+        component
         );
 
     if (editing){
@@ -3422,8 +3426,7 @@ void drawNumberInputSetting(Component * component, SettingsElement * currentRowE
           hightlightChar,
           component->settings_properties.colors[0], 
           component->settings_properties.colors[1],
-          &component->printBuffer,
-          &component->printBufferSize
+          component
           );
       free(hightlightChar);
     }
@@ -3445,11 +3448,18 @@ void drawUI() {
     calculateHintMessages(NULL, NULL, NULL, 0);
 
     calculateComponentDimensions(&parentComponent, &parentComponent);
+
     
+    //if (viewport->isUpdated){
+    //  drawViewport(viewport, viewport->parent);
+      //viewport->isUpdated = 0;
+    //}
     //TODO: Change this draw component for the actual search of the component on focus
     // Must make a function that recursively search for the focused component and builds the hints
     // Seach by pointer reference
     //drawComponent(focusComponent, focusComponent->parent);
+
+    drawComponent(&parentComponent, NULL);
 
   }
 
@@ -3458,10 +3468,9 @@ void drawUI() {
   //addComponentToTable(viewport, &cmpsToUpdate);
   // int i = 0/0;
 
-  
-  for (int i = 0; i < cmpsToUpdate.length; i++) {
-    drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent);
-  }
+  //for (int i = 0; i < cmpsToUpdate.length; i++) {
+  //  drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent);
+  //}
   //drawComponent(&parentComponent, &parentComponent, &actionHints, &modeHints);
   if (updatingHints == 1){
     // int i = 0/0;
@@ -4227,8 +4236,10 @@ Component *newContainer() {
   cont->actionHint = NULL;
   cont->modeHint = NULL;
   cont->isVisible = 1;
-  cont->printBuffer = malloc(sizeof(char) * 1024);
-  cont->printBufferSize = 0;
+  cont->printBuffer = malloc(sizeof(char *));
+  *(cont->printBuffer) = malloc(sizeof(char) * 1024);
+  cont->printBufferSize = 1024;
+  cont->writtenBufferSize = 0;
 
   return cont;
 }
@@ -4610,35 +4621,47 @@ void emptyComponentTable(ComponentTable *table) {
   table->length = 0;
 }
 
-void appendToPrintBuffer(char ** printBuffer, int * printBufferSize, char * string, ...){
+void appendToPrintBuffer(Component * component, char * string, ...){
   va_list strArgs;
   va_list strArgsCpy;
   va_start(strArgs, string);
   va_copy(strArgsCpy, strArgs);
   long appendSize = vsnprintf(NULL, 0, string, strArgsCpy);
 
-  long realBufferSize;
-  if (printBufferSize == 0){
-    realBufferSize = 1024;
-  }else{
-    realBufferSize = (long) 1024 * (long) 2 << *printBufferSize;
-  }
-  long writtenSize = strlen(*printBuffer);
-  long neededSize = writtenSize + appendSize;
+  long neededSize = component->writtenBufferSize + appendSize+1;
   int bufferResize = 0;
-  while(neededSize > realBufferSize){
-    (*printBuffer)++;
-    realBufferSize = (long) 1024 * (long) 2 << *printBufferSize;
+  //debug("Needed size: %d", neededSize);
+  while(neededSize > component->printBufferSize){
+    debug("Current size: %d, Needed: %d", component->printBufferSize, neededSize);
+    //debug("Increasing buffer");
+    component->printBufferSize *= 2;
     bufferResize = 1;
   }
 
   if (bufferResize == 1){
-    char *auxBuffer = malloc(sizeof(char) * (realBufferSize + 1));
-    memcpy(auxBuffer, *printBuffer, writtenSize+1);
-    free(*printBuffer);
-    *printBuffer = auxBuffer;
+    //char *auxBuffer = malloc(sizeof(char) * (component->printBufferSize));
+    //memcpy(auxBuffer, *component->printBuffer, component->writtenBufferSize+1);
+    *component->printBuffer = realloc(*component->printBuffer, component->printBufferSize);
+    //free(*component->printBuffer);
+    //*component->printBuffer = auxBuffer;
   }
-  
-  vsnprintf((*printBuffer) + writtenSize, appendSize, string, strArgs);
+
+  vsnprintf((*component->printBuffer) + component->writtenBufferSize, component->printBufferSize - component->writtenBufferSize, string, strArgs);
+  //(*component->printBuffer)[neededSize] = '\n';
+  component->writtenBufferSize += appendSize;
+  debug("New print buffer: %s", *component->printBuffer);
+  va_end(strArgs);
   //memcpy((*printBuffer) + writtenSize, string, strlen(string)+1);
+}
+
+void clearPrintBuffer(Component * component){
+  *(component->printBuffer)[0] = '\0';
+  component->writtenBufferSize = 0;
+}
+
+void printBuffer(Component * component){
+  fwrite(*component->printBuffer, sizeof(char), strlen(*component->printBuffer), stdout);
+  //printf("%s", *component->printBuffer);
+
+  fflush(stdout);
 }
