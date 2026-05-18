@@ -256,15 +256,15 @@ typedef struct ComponentTable {
 /*Function declaration*/
 void initUI();
 void drawUI();
-void drawContainer(Component *component, Component *parent);
-void drawComponent(Component *component, Component *parent);
+void drawContainer(Component *component, Component *parent, int forceDraw);
+void drawComponent(Component *component, Component *parent, int forceDraw);
 void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
              Color borderColor, Component * component);
-void drawViewport(Component *component, Component *parent);
-void drawTabView(Component *component, Component *parent);
-void drawTextComponent(Component *component);
-void drawTreeView(Component *component);
-void drawSettingsComponent(Component *component);
+void drawViewport(Component *component, Component *parent, int forceDraw);
+void drawTabView(Component *component, Component *parent, int forceDraw);
+void drawTextComponent(Component *component, int forceDraw);
+void drawTreeView(Component *component, int forceDraw);
+void drawSettingsComponent(Component *component, int forceDraw);
 void drawNumberInputSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
 void drawLineTextSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow, int editing);
 void drawCheckSetting(Component * component, SettingsElement * currentRowElement, int globalX, int globalY, int localRow);
@@ -701,7 +701,10 @@ int handleTreeViewInput(Component *component, char keypress) {
 
   
   //debug("New selected element: %s", component->treeview_properties.selectedElement->texts.table[2]);
-  if (updateThisCMP) debug("New selected element: %d", component->treeview_properties.selectedElement);
+  if (updateThisCMP) {
+    updateComponent(component->parent, 0);
+    debug("New selected element: %d", component->treeview_properties.selectedElement);
+  }
   if(redrawWholeComponent){
     //Mark all elements as updated
     updateComponent(component->parent, 1);
@@ -2361,39 +2364,41 @@ void get_terminal_size(int *rows, int *cols) {
 /********************* Component drawing ***************************/
 /*******************************************************************/
 
-void drawComponent(Component *component, Component *parent) {
+void drawComponent(Component *component, Component *parent, int forceDraw) {
   debug("Drawing component %d.", component);
   if (component->isVisible == 0){
     return;
   }
   switch (component->component_type) {
   case container_t:
-    drawContainer(component, parent);
+    drawContainer(component, parent, forceDraw);
     break;
   case viewport_t:
-    drawViewport(component, parent);
+    drawViewport(component, parent, forceDraw);
     break;
   case tabview_t:
-    drawTabView(component, parent);
+    drawTabView(component, parent, forceDraw);
     break;
   case text_t:
-    drawTextComponent(component);
+    drawTextComponent(component, forceDraw);
     break;
   case treeview_t:
-    drawTreeView(component);
+    drawTreeView(component, forceDraw);
     break;
   case settings_t:
-    drawSettingsComponent(component);
+    drawSettingsComponent(component, forceDraw);
   }
 }
 
-void drawContainer(Component *component, Component *parent) {
+void drawContainer(Component *component, Component *parent, int forceDraw) {
   debug("***Drawing container %d.\n X: %d, Y: %d,\n height: %d,\n width: %d",
         component, component->x, component->y, component->real_height,
         component->real_width);
+  int updated = 0;
   if (component->isUpdated != 0) {
+    updated = 1;
     clearPrintBuffer(component);
-    component->isUpdated--;
+    component->isUpdated = 0;
     // Draws the border
     if (component == &parentComponent) {
       component->global_x = component->x;
@@ -2411,10 +2416,11 @@ void drawContainer(Component *component, Component *parent) {
               component);
     }
   }
-  printBuffer(component);
+  if(forceDraw || updated) printBuffer(component);
+
   // Iterates over every child component
   for (int i = 0; i < component->childCount; i++) {
-    drawComponent(component->children[i], component);
+    drawComponent(component->children[i], component, forceDraw || updated);
   }
 }
 
@@ -2485,10 +2491,10 @@ void printText(int x, int y, char *text, Color bg, Color fg, Component * compone
   //fflush(stdout);
 }
 
-void drawViewport(Component *component, Component *parent) {
+void drawViewport(Component *component, Component *parent, int forceDraw) {
 
   int updated = 0;
-  if (component->isUpdated > 0) {
+  if (component->isUpdated > 0 || forceDraw) {
     updated = 1;
     //clearPrintBuffer(component);
     component->isUpdated--;
@@ -2512,17 +2518,15 @@ void drawViewport(Component *component, Component *parent) {
         component->viewport_properties.vp_settings->screen_height;
     component->viewport_properties.vp_settings->render_settings->screen_width =
         component->viewport_properties.vp_settings->screen_width;
-  }
 
-  if (component->viewport_properties.vp_settings->window != NULL) {
-    resizeWindow(component->viewport_properties.vp_settings);
-  }
+    if (component->viewport_properties.vp_settings->window != NULL) {
+      resizeWindow(component->viewport_properties.vp_settings);
+    }
 
-  debug("Viewport Size: %d x; %d y",
-        component->viewport_properties.vp_settings->screen_width,
-        component->viewport_properties.vp_settings->screen_height);
+    debug("Viewport Size: %d x; %d y",
+          component->viewport_properties.vp_settings->screen_width,
+          component->viewport_properties.vp_settings->screen_height);
 
-  if (updated){
     //printBuffer(component);
     if (component->viewport_properties.vp_settings->window == NULL) {
       debug("Initializing viewport");
@@ -2535,18 +2539,20 @@ void drawViewport(Component *component, Component *parent) {
     Camera myCam = component->viewport_properties.vp_settings->render_settings->active_camera;
     debug("Camera direction: %f, %f, %f", myCam.dir.x, myCam.dir.y, myCam.dir.z);
 
-    vp_render_viewport(component->viewport_properties.vp_settings);
+    //vp_render_viewport(component->viewport_properties.vp_settings);
     vp_render_viewport(component->viewport_properties.vp_settings);
   }
 }
 
 /*Function that handles the drawing of a tabview*/
-void drawTabView(Component *component, Component *parent) {
+void drawTabView(Component *component, Component *parent, int forceDraw) {
   // TODO: Handle tab Height
   debug("***Drawing tabview***");
+  int updated = 0;
   if (component->isUpdated != 0) {
+    updated = 1;
     clearPrintBuffer(component);
-    component->isUpdated--;
+    component->isUpdated = 0;
     /*Draws the actual tabs*/
     // Update the global coordinates
     component->global_x = component->x + parent->global_x;
@@ -2671,18 +2677,23 @@ void drawTabView(Component *component, Component *parent) {
               component);
   }
 
-  printBuffer(component);
+  if (forceDraw || updated){
+    debug("Painting tab view component");
+    printBuffer(component);
+  }
   // Draws the component of the selected tab
   if (component->tabview_properties.selectedTab >= component->childCount)
     return;
   drawComponent(component->children[component->tabview_properties.selectedTab],
-                component);
+                component, forceDraw || updated);
 }
 
 /*Function that draws a text component*/
-void drawTextComponent(Component *component) {
+void drawTextComponent(Component *component, int forceDraw) {
   debug("Drawing text component");
+  int updated = 1;
   if (component->isUpdated != 0) {
+    updated = 0;
     clearPrintBuffer(component);
     component->isUpdated--;
     debug("Printing text %s in text of size %dx %dy. Len: %d",
@@ -2846,26 +2857,26 @@ void drawTextComponent(Component *component) {
     free(currentColor);
   }
 
-  printBuffer(component);
+  if (forceDraw || updated) printBuffer(component);
 
   for (int i = 0; i < component->childCount; i++) {
     if (component->children[i] != NULL) {
-      drawComponent(component->children[i], component->parent);
+      drawComponent(component->children[i], component->parent, forceDraw || updated);
     }
   }
   // int i = 0/0;
 }
 
 /*Function that draws the TreeView*/
-void drawTreeView(Component *component) {
+void drawTreeView(Component *component, int forceDraw) {
   debug("\n\n*** Drawing treeViewElement at %dx %dy ***	\n", component->x,
         component->y);
   if (component->isUpdated == 0){
-    printBuffer(component);
+    if (forceDraw) printBuffer(component);
     return;
   }
   clearPrintBuffer(component);
-  component->isUpdated--;
+  component->isUpdated = 0;
   preCalculateTreeViewComponent(component);
 
   component->global_x = component->parent->global_x + component->x;
@@ -3010,7 +3021,7 @@ void drawTreeView(Component *component) {
         textElement->x = 3 * hierarchyLevel;
 
         // Draw the text element
-        drawTextComponent(textElement);
+        drawTextComponent(textElement, 1);
       //}
       actualHeight++;
     }
@@ -3055,16 +3066,18 @@ void drawTreeView(Component *component) {
     }
   }
 
+  debug("Painting tree view component");
   printBuffer(component);
 
   free(stringToPrint);
 }
 
-void drawSettingsComponent(Component *component) {
+void drawSettingsComponent(Component *component, int forceDraw) {
   if (component->isUpdated == 0){
-    printBuffer(component);
+    if (forceDraw) printBuffer(component);
     return;
   }
+  component->isUpdated = 0;
   clearPrintBuffer(component);
   SettingsElement * currentRowElement = component->settings_properties.child;
   int localRow = 0;
@@ -3118,7 +3131,7 @@ void drawSettingsComponent(Component *component) {
       textComponent->text_properties.textColor = component->settings_properties.colors[1];
       textComponent->text_properties.bgColor = component->settings_properties.colors[0];
     }
-    drawTextComponent(textComponent);
+    drawTextComponent(textComponent, 1);
     if (component->settings_properties.focusElement == currentRowElement &&
           component->settings_properties.editing == 1){
       editing = 1;
@@ -3154,6 +3167,7 @@ void drawSettingsComponent(Component *component) {
     currentRowElement = currentRowElement->nextElement;
     localRow++;
   }
+  debug("Painting settings component");
   printBuffer(component);
 }
 
@@ -3459,7 +3473,7 @@ void drawUI() {
     // Seach by pointer reference
     //drawComponent(focusComponent, focusComponent->parent);
 
-    drawComponent(&parentComponent, NULL);
+    //drawComponent(&parentComponent, NULL, 0);
 
   }
 
@@ -3468,9 +3482,9 @@ void drawUI() {
   //addComponentToTable(viewport, &cmpsToUpdate);
   // int i = 0/0;
 
-  //for (int i = 0; i < cmpsToUpdate.length; i++) {
-  //  drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent);
-  //}
+  for (int i = 0; i < cmpsToUpdate.length; i++) {
+    drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent, 0);
+  }
   //drawComponent(&parentComponent, &parentComponent, &actionHints, &modeHints);
   if (updatingHints == 1){
     // int i = 0/0;

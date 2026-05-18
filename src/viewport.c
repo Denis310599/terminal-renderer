@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <time.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -96,14 +97,15 @@ void vp_render_viewport(ViewportSettings * viewportSettings){
 
 	//Move cursor to location and prints
 	//printf("Moving cursor\n");
-	//printf("\033[0;0H");
+	printf("\033[0;0H");
 	fflush(stdout);
 	char moveCursor[] = "123[200;200H";
 	//printf("%d\n",viewportSettings->x);
 	//printf("%d\n",viewportSettings->y);
 	fflush(stdout);
 	sprintf((char *) moveCursor, "\033[%d;%dH", viewportSettings->y+1, viewportSettings->x+1);
-	printf("%s",moveCursor);
+	//printf("%s",moveCursor);
+	fwrite(moveCursor, sizeof(char), strlen(moveCursor), stdout);
 	fflush(stdout);
 
 	//printf("Printing viewport\n");
@@ -131,6 +133,7 @@ void vp_render_viewport(ViewportSettings * viewportSettings){
 		printf("%s",moveCursor);
 		fflush(stdout);
 		printf("FPS %d", fps);
+		fflush(stdout);
 		fps = 0;
 	}
 }
