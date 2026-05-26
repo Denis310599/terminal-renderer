@@ -390,6 +390,11 @@ void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in, ViewportSetting
 	//getchar();
 }
 
+void vp_delete_frame(){
+	printf("\033_Ga=d,d=i,i=%d\033\\",!FRAME_BUFFER_INDEX+1);
+	printf("\033_Ga=d,d=i,i=%d\033\\",FRAME_BUFFER_INDEX+1);
+}
+
 static const unsigned char base64_table[65] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

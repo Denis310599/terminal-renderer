@@ -34,6 +34,7 @@ typedef struct Color {
 /*Definition of the components*/
 typedef struct Container {
   int isFocus;
+  int transparent;
 } Container;
 
 typedef struct Viewport {
@@ -285,6 +286,7 @@ void calculateTextComponent(Component *component);
 void preCalculateTreeViewComponent(Component *component);
 
 Component *newContainer();
+Component *newContainerCmp();
 Component *newViewport();
 Component *newTabView();
 Component *newTextComponent(char *text);
@@ -343,6 +345,8 @@ int handleViewportInput(Component * component, char keypress);
 void calculateHintsObjectManager();
 void calculateHintSettingsWidget(Component * settingsComponent);
 void calculateCommnandHintViewport();
+Component * getRootComponent(Component * component);
+int findBufferStackIndex(Component * rootComponent);
 
 /*Color deffinitions*/
 const Color BG_COLOR = (Color){7, 18, 36};
@@ -359,7 +363,6 @@ const Color FONT_COLOR_HIGHLIGHT = (Color){200, 200, 200};
 const Color BG_VP_COLOR = (Color){60, 60, 60};
 
 /*Variable deffinitions*/
-int redrawBuffers = 1;
 Component parentComponent;
 Component *focusComponent;
 ComponentTable cmpsToUpdate;
@@ -374,6 +377,10 @@ Component * modeHintsComponent;
 Component * commandHintComponent;
 ObjectManagerData * objectManagerData;
 Object * axisObjects[12];
+Component ** bufferStack = NULL;
+int redrawBuffers = 1;
+int bufferStackLength = 0;
+int lowerBufferToUpdate = 0;
 
 /*Handler deffinition*/
 int handleObjectPropertiesKeyPress(Component * component, char keypress){
@@ -1653,7 +1660,7 @@ void initUI() {
   // Prepares the terminal
   prepareTerminal();
 
-  parentComponent = *newContainer();
+  parentComponent = *newContainerCmp();
   // Calculates component table
   parentComponent.x = 0;
   parentComponent.y = 0;
@@ -1671,7 +1678,7 @@ void initUI() {
   parentComponent.padding = 0;
 
   /*Commands bar container*/
-  Component *child = newContainer();
+  Component *child = newContainerCmp();
   child->bottomToBottomOf = &parentComponent;
   child->marginTop = 0;
   child->startToStartOf = &parentComponent;
@@ -1706,7 +1713,7 @@ void initUI() {
 
 
   /*Status bar container*/
-  child = newContainer();
+  child = newContainerCmp();
   child->bottomToTopOf = parentComponent.children[0];
   child->startToStartOf = &parentComponent;
   child->endToEndOf = &parentComponent;
@@ -1732,7 +1739,7 @@ void initUI() {
 
 
   /*Top Menu container*/
-  child = newContainer();
+  child = newContainerCmp();
   child->topToTopOf = &parentComponent;
   child->startToStartOf = &parentComponent;
   child->endToEndOf = &parentComponent;
@@ -1745,7 +1752,7 @@ void initUI() {
   parentComponent.children[2] = child;
 
   /*Object container*/
-  child = newContainer();
+  child = newContainerCmp();
   child->topToBottomOf = parentComponent.children[2];
   child->bottomToTopOf = parentComponent.children[1];
   child->startToStartOf = &parentComponent;
@@ -1762,7 +1769,7 @@ void initUI() {
   parentComponent.children[3] = child;
 
   /*Main buttons container*/
-  child = newContainer();
+  child = newContainerCmp();
   child->topToBottomOf = parentComponent.children[2];
   child->startToStartOf = &parentComponent;
   child->endToStartOf = parentComponent.children[3];
@@ -1788,7 +1795,7 @@ void initUI() {
   parentComponent.children[4] = child;
 
   /*Viewport container*/
-  child = newContainer();
+  child = newContainerCmp();
   child->topToBottomOf = parentComponent.children[4];
   child->startToStartOf = &parentComponent;
   child->endToStartOf = parentComponent.children[3];
@@ -1864,7 +1871,7 @@ void initUI() {
   tabView->children = malloc(sizeof(Component *) * 2);
   tabView->childCount = 2;
 
-  tabView->children[0] = newContainer();
+  tabView->children[0] = newContainerCmp();
 
   tabView->children[0]->topToTopOf = tabView;
   tabView->children[0]->bottomToBottomOf = tabView;
@@ -1971,7 +1978,7 @@ void initUI() {
   */
 
   /*Material tab*/
-  tabView->children[1] = newContainer();
+  tabView->children[1] = newContainerCmp();
   tabView->children[1]->topToTopOf = tabView;
   tabView->children[1]->bottomToBottomOf = tabView;
   tabView->children[1]->endToEndOf = tabView;
@@ -2008,6 +2015,51 @@ void initUI() {
   addComponentToTable(&parentComponent, &cmpsToUpdate);
 
   createAxis();
+
+  bufferStackLength = 2;
+  bufferStack = malloc(sizeof(Component *) * bufferStackLength);
+
+  Component * floatWindow = newContainerCmp();
+  floatWindow->height = rows;
+  floatWindow->width = cols;
+  floatWindow->real_width = cols;
+  //floatWindow->real_height = rows;
+  floatWindow->x = 0;
+  floatWindow->y = 0;
+  floatWindow->isUpdated = 3;
+  floatWindow->component_type = container_t;
+  floatWindow->backgroundColor = BG_COLOR_HIGHLIGHT2;
+  floatWindow->border = 1;
+  floatWindow->padding = 0;
+  floatWindow->parent = floatWindow;
+  //floatWindow->autoHeight = 2;
+  //loatWindow->autoWidth = 2;
+  //floatWindow->heightBias = 0.8f;
+  //floatWindow->widthBias = 0.8f;
+  floatWindow->container_properties.transparent = 1;
+  
+  floatWindow->childCount = 1;
+  floatWindow->children = malloc(sizeof(Component *) * 1);
+  Component * actualFloatWindow = newContainerCmp();
+  actualFloatWindow->autoHeight = 2;
+  actualFloatWindow->autoWidth = 2;
+  actualFloatWindow->heightBias = 0.8f;
+  actualFloatWindow->widthBias = 0.8f;
+  actualFloatWindow->border = 1;
+  actualFloatWindow->topToTopOf = floatWindow;
+  actualFloatWindow->bottomToBottomOf = floatWindow;
+  actualFloatWindow->startToStartOf = floatWindow;
+  actualFloatWindow->endToEndOf = floatWindow;
+  actualFloatWindow->parent = floatWindow;
+  actualFloatWindow->backgroundColor = BG_2_COLOR;
+  floatWindow->children[0] = actualFloatWindow;
+  
+
+
+  lowerBufferToUpdate = 0;
+  bufferStack[0] = &parentComponent;
+  bufferStack[1] = floatWindow;
+
 }
 
 void createAxis(){
@@ -2222,20 +2274,27 @@ void prepareTerminal() {
 void handle_resize(int a) {
   debug("Resizing window");
   printf("\033[2J");
-  // marco elementos como por updatear
-  updateComponent(&parentComponent, 1);
-
   int rows, cols;
   get_terminal_size(&rows, &cols);
-  parentComponent.height = rows;
-  parentComponent.width = cols;
-  parentComponent.real_width = cols;
+  // marco elementos como por updatear
+  for (int i = 0; i<bufferStackLength; i++){
+    updateComponent(bufferStack[i], 1);
+    bufferStack[i]->height = rows;
+    bufferStack[i]->width = cols;
+    bufferStack[i]->real_width = cols;
+  }
+
 }
 
 void updateComponent(Component *component, int resize) {
-  redrawBuffers = 1;
   if (resize == 1) {
-    markComponentResized(&parentComponent);
+    markComponentResized(getRootComponent(component));
+    redrawBuffers = 1;
+  }else{
+    int auxBuffIdex = findBufferStackIndex(getRootComponent(component));
+    if ( auxBuffIdex != -1 && auxBuffIdex < lowerBufferToUpdate){
+      lowerBufferToUpdate = auxBuffIdex;
+    }
   }
   markComponentUpdated(component);
   // Add component to updated list
@@ -2358,6 +2417,7 @@ void get_terminal_size(int *rows, int *cols) {
   ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
   *rows = w.ws_row;
   *cols = w.ws_col;
+  debug("Terminal size: %d, %d", w.ws_col, w.ws_row);
 }
 
 /*******************************************************************/
@@ -2400,22 +2460,27 @@ void drawContainer(Component *component, Component *parent, int forceDraw) {
     clearPrintBuffer(component);
     component->isUpdated = 0;
     // Draws the border
-    if (component == &parentComponent) {
+    if (component == parent) {
       component->global_x = component->x;
       component->global_y = component->y;
-      drawBox(component->x, component->y, component->real_height,
-              component->real_width, component->border,
-              component->backgroundColor, (Color){},
-              component);
+      if (component->container_properties.transparent == 0){
+        drawBox(component->x, component->y, component->real_height,
+                component->real_width, component->border,
+                component->backgroundColor, (Color){},
+                component);
+      }
     } else if (parent != NULL) {
       component->global_x = component->x + parent->global_x;
       component->global_y = component->y + parent->global_y;
-      drawBox(component->global_x, component->global_y, component->real_height,
-              component->real_width, component->border,
-              component->backgroundColor, (Color){},
-              component);
+      if (component->container_properties.transparent == 0){
+        drawBox(component->global_x, component->global_y, component->real_height,
+                component->real_width, component->border,
+                component->backgroundColor, (Color){},
+                component);
+      }
     }
   }
+  //debug("Container print buffer %s", component->printBuffer);
   if(forceDraw || updated) printBuffer(component);
 
   // Iterates over every child component
@@ -2540,7 +2605,17 @@ void drawViewport(Component *component, Component *parent, int forceDraw) {
     debug("Camera direction: %f, %f, %f", myCam.dir.x, myCam.dir.y, myCam.dir.z);
 
     //vp_render_viewport(component->viewport_properties.vp_settings);
-    vp_render_viewport(component->viewport_properties.vp_settings);
+    
+    //Only render the image when it's displayed
+    Component *rootCmp = getRootComponent(component);
+    for (int i = 0; i< bufferStackLength; i++){
+      if (rootCmp == bufferStack[i]){
+        if (bufferStackLength == (i+1)){
+          vp_render_viewport(component->viewport_properties.vp_settings);
+        }
+        break;
+      }
+    }
   }
 }
 
@@ -3451,7 +3526,6 @@ void drawNumberInputSetting(Component * component, SettingsElement * currentRowE
 }
 
 
-
 void drawUI() {
   updateAxis();
   int updatingHints = 0;
@@ -3461,7 +3535,10 @@ void drawUI() {
     updatingHints = 1;
     calculateHintMessages(NULL, NULL, NULL, 0);
 
-    calculateComponentDimensions(&parentComponent, &parentComponent);
+    for (int i = 0; i<bufferStackLength; i++){
+      calculateComponentDimensions(bufferStack[i], bufferStack[i]);
+    }
+    //calculateComponentDimensions(&parentComponent, &parentComponent);
 
     
     //if (viewport->isUpdated){
@@ -3482,9 +3559,31 @@ void drawUI() {
   //addComponentToTable(viewport, &cmpsToUpdate);
   // int i = 0/0;
 
+  /*
   for (int i = 0; i < cmpsToUpdate.length; i++) {
     drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent, 0);
+  }*/
+
+  
+  if (redrawBuffers){
+    redrawBuffers = 0;
+    for (int i = 0; i<bufferStackLength; i++){
+      Component * auxParentCmp = bufferStack[i]->parent;
+      if (bufferStack[i] == &parentComponent) auxParentCmp = &parentComponent;
+      debug("Drawing buffer (Forced) %d", i);
+      drawComponent(bufferStack[i], bufferStack[i], 1);
+    }
+  }else if(lowerBufferToUpdate != -1){
+      debug("Drawing buffer %d (Regular)", lowerBufferToUpdate);
+    drawComponent(bufferStack[lowerBufferToUpdate], bufferStack[lowerBufferToUpdate], 0);
+    for (int i = lowerBufferToUpdate+1; i<bufferStackLength; i++){
+      Component * auxParentCmp = bufferStack[i]->parent;
+      if (bufferStack[i] == &parentComponent) auxParentCmp = &parentComponent;
+      debug("Drawing buffer %d (Forced)", i);
+      drawComponent(bufferStack[i], bufferStack[i], 1);
+    }
   }
+  lowerBufferToUpdate = -1;
   //drawComponent(&parentComponent, &parentComponent, &actionHints, &modeHints);
   if (updatingHints == 1){
     // int i = 0/0;
@@ -3884,7 +3983,7 @@ void calculateComponentDimensionsHeight(Component *component,
   debug("max_y = %d", max_y);
 
 
-  if (component == &parentComponent) {
+  if (component == component->parent) {
     debug("Component is parent");
     component->real_height = component->height;
   } else if (component->autoHeight == 1) {
@@ -3948,7 +4047,7 @@ void calculateComponentDimensionsHeight(Component *component,
 
     // Both are deffined, we get the middle point (or biased)
     float auxBias = component->yBias != -1 ? component->yBias * 2 : 1;
-    if (component != &parentComponent)
+    if (component != component->parent)
       component->y =
           min_y + auxBias * (max_y - min_y - component->real_height) / 2;
 
@@ -3977,7 +4076,7 @@ void calculateComponentDimensionsHeight(Component *component,
     }
     // Both are deffined, we get the middle point (or biased)
     float auxBias = component->yBias != -1 ? component->yBias * 2 : 1;
-    if (component != &parentComponent)
+    if (component != component->parent)
       component->y =
           min_y + auxBias * (max_y - min_y - component->real_height) / 2;
     // if (component != &parentComponent) component->y = middlePoint +
@@ -4076,7 +4175,7 @@ void calculateComponentDimensionsWidth(Component *component,
   debug("max_x = %d", max_x);
 
 
-  if (component == &parentComponent) {
+  if (component->parent == component) {
     debug("Component is parent");
     component->real_width = component->width;
   } else if (component->autoWidth == 1) {
@@ -4148,7 +4247,7 @@ void calculateComponentDimensionsWidth(Component *component,
 
       // Both are deffined, we get the middle point (or biased)
       float auxBias = component->xBias != -1 ? component->xBias * 2 : 1;
-      if (component != &parentComponent)
+      if (component != component->parent)
         component->x =
             min_x + auxBias * (max_x - min_x - component->real_width) / 2.0f;
       }else{
@@ -4179,7 +4278,7 @@ void calculateComponentDimensionsWidth(Component *component,
 
     // Both are deffined, we get the middle point (or biased)
     float auxBias = component->xBias != -1 ? component->xBias * 2 : 1;
-    if (component != &parentComponent)
+    if (component != component->parent)
       component->x =
           min_x + auxBias * (max_x - min_x - component->real_width) / 2.0f;
 
@@ -4199,10 +4298,10 @@ void calculateComponentDimensionsWidth(Component *component,
 
     // Both are deffined, we get the middle point (or biased)
     float auxBias = component->xBias != -1 ? component->xBias * 2 : 1;
-    if (component != &parentComponent)
+    if (component != component->parent)
       component->x =
           min_x + auxBias * (max_x - min_x - component->real_width) / 2.0f;
-    // if (component != &parentComponent) component->y = middlePoint +
+    // if (component != component->parent) component->y = middlePoint +
     // component->real_height/2;
   }
   debug("Final width component %d: %d", parent, component->real_width);
@@ -4246,6 +4345,14 @@ Component *newContainer() {
   cont->widthBias = -1;
   cont->maxHeight = -1;
   cont->minHeight = -1;
+  cont->topToTopOf = NULL;
+  cont->topToBottomOf = NULL;
+  cont->bottomToBottomOf = NULL;
+  cont->bottomToTopOf = NULL;
+  cont->startToStartOf = NULL;
+  cont->startToEndOf = NULL;
+  cont->endToEndOf = NULL;
+  cont->endToStartOf = NULL;
   cont->onKeyPress = handleDefaultInput;
   cont->actionHint = NULL;
   cont->modeHint = NULL;
@@ -4258,6 +4365,12 @@ Component *newContainer() {
   return cont;
 }
 
+Component *newContainerCmp() {
+  debug("Creating Container");
+  Component *cont = newContainer();
+  cont->container_properties.transparent = 0;
+  return cont;
+}
 Component *newViewport() {
   debug("Creating viewport");
   Component *cont = newContainer();
@@ -4678,4 +4791,50 @@ void printBuffer(Component * component){
   //printf("%s", *component->printBuffer);
 
   fflush(stdout);
+}
+
+Component * getRootComponent(Component * component){
+  Component * rootComponent = component;
+  while (rootComponent->parent != NULL && rootComponent != rootComponent->parent){
+    rootComponent = rootComponent->parent;
+  }
+  return rootComponent;
+}
+
+void focusBuffer(Component * rootComponent){
+  //Searchs for the buffer in the stack
+  int rootPosition = -1;
+  for (int i = 0; i<bufferStackLength; i++){
+    if (bufferStack[i] == rootComponent){
+      rootPosition = i;
+      break;
+    }
+  }
+  if (rootPosition != -1){
+    //Moves the stack at front if exists
+    if (rootPosition == (bufferStackLength-1)) return;
+
+    memmove(bufferStack + rootPosition,
+            bufferStack + rootPosition +1,
+            bufferStackLength - rootPosition-1);
+  }else{
+    //Adds the stack at front if not exists
+    bufferStackLength += 1;
+    bufferStack = realloc(bufferStack, sizeof(Component *) * bufferStackLength);
+  }
+
+  //Do something here for forcing a draw
+  redrawBuffers = 1;
+
+}
+
+int findBufferStackIndex(Component * rootComponent){
+  int rootPosition = -1;
+  for (int i = 0; i<bufferStackLength; i++){
+    if (bufferStack[i] == rootComponent){
+      rootPosition = i;
+      break;
+    }
+  }
+  return rootPosition;
 }
