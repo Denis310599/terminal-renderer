@@ -13,17 +13,17 @@
 #include "../include/renderer.h"
 #include "../include/cglm/cglm.h"
 
-	int SCREEN_WIDTH = 200;
-	int SCREEN_HEIGHT = 50;
-	int GPU_MODE = 0;
-	int FAST_LIGHT = 0;
-	double FRONT_CLIP = 0.1;
-	double UMBRAL_LUZ = 0.1;
-	int COLOR_MODE = 0;
-	Camera ACTIVE_CAMERA = (Camera){};
-	double FPS = 0;
-	double DELTA_TIME = 0;
-	double PIXEL_RESOL = 2;
+int SCREEN_WIDTH = 200;
+int SCREEN_HEIGHT = 50;
+int GPU_MODE = 0;
+int FAST_LIGHT = 0;
+double FRONT_CLIP = 0.1;
+double UMBRAL_LUZ = 0.1;
+int COLOR_MODE = 0;
+Camera ACTIVE_CAMERA = (Camera){};
+double FPS = 0;
+double DELTA_TIME = 0;
+double PIXEL_RESOL = 2;
 //Funcion que dibuja el borde en el mapa que se le pasa como parametro
 int dibujaBorde(int x, int y, int indice, char* mapa);
 
@@ -74,7 +74,18 @@ void debug(char *  msg, ...){
 			debugFile = fopen("./debug.out", "w");
 		}
 		va_start(argPtr, msg);
-		fprintf(debugFile, "[BEBUG]");
+	//fprintf(debugFile, "[BEBUG]");
+		time_t raw_time = time(NULL);
+		struct tm local_time;
+
+		// Versión segura para hilos (POSIX). En Windows usa: localtime_s(&local_time, &raw_time);
+		localtime_r(&raw_time, &local_time);
+
+		// sprintf es rápido si el formato es fijo y directo
+		fprintf(debugFile, "[%02d:%02d:%02d]",
+			local_time.tm_hour,
+			local_time.tm_min,
+			local_time.tm_sec);
 		//fprintf(debugFile, "%d\n", 1);
 		//vfprintf(FILE *, const char *, struct __va_list_tag *)
 		vfprintf(debugFile, msg, argPtr);

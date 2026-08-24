@@ -337,6 +337,8 @@ TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
 void loadNewObject(char * uri, int format);
 void rotateObject(Object * object, vec3 axis, float angle);
 void createAxis();
+Component * createFloatingWindow();
+void showImportSTLWindow();
 
 /*Custom function declaration(aka handlers)*/
 int handleObjectManajerKeyPress(Component *component, char keypress);
@@ -347,6 +349,10 @@ void calculateHintSettingsWidget(Component * settingsComponent);
 void calculateCommnandHintViewport();
 Component * getRootComponent(Component * component);
 int findBufferStackIndex(Component * rootComponent);
+void deleteComponent(Component * component);
+void deleteBufferStackComponent(Component * rootComponent);
+void focusBuffer(Component * rootComponent);
+int handleImportSTLInput(Component * rootComponent, char keypress);
 
 /*Color deffinitions*/
 const Color BG_COLOR = (Color){7, 18, 36};
@@ -378,6 +384,8 @@ Component * commandHintComponent;
 ObjectManagerData * objectManagerData;
 Object * axisObjects[12];
 Component ** bufferStack = NULL;
+Component * importSTLWindow = NULL;
+
 int redrawBuffers = 1;
 int bufferStackLength = 0;
 int lowerBufferToUpdate = 0;
@@ -597,7 +605,8 @@ int handleTreeViewInput(Component *component, char keypress) {
       break;
     case 'n':
       //New object
-      loadNewObject("../assets/teapot.stl", 0);
+      //loadNewObject("../assets/teapot.stl", 0);
+      showImportSTLWindow();
       updateThisCMP = 0;
       break;
     case 't':
@@ -1059,10 +1068,11 @@ int handleViewportInput(Component * component, char keypress){
           break;
         case 'i': 
           movVector = myCam.dir;
+          scaler *= 7; // So zoom at same speed as other movement
           break;
         case 'o':
           movVector = myCam.dir;
-          scaler *= -1;
+          scaler *= -1*7; // So zoom at same speed as other movement
           break;
       }
       //Transpose the camera position to the new location
@@ -1137,6 +1147,28 @@ int handleViewportInput(Component * component, char keypress){
   }
 
   return inputHandled;
+}
+
+int handleImportSTLInput(Component * rootComponent, char keypress){
+  debug("Handling keypress on ImportSTL. Input: %c", keypress);
+  int keyHandled = 1;
+  
+  // Try to handle with children
+
+  //Otherwise handle it here
+  switch(keypress){
+      case 27:
+        //Exit component
+        //focusBuffer(&parentComponent);
+        deleteBufferStackComponent(importSTLWindow);
+        focusComponent = objectManagerComponent;
+        importSTLWindow = NULL;
+        break;
+      default:
+        keyHandled = 0;
+  }
+
+  return keyHandled;
 }
 
 int handleSettingInput(Component *component, char keypress) {
@@ -1624,8 +1656,64 @@ void rotateObject(Object * object, vec3 axis, float angle){
   object->rot.z = rad2deg(finalAngles[2]);
 }
 
+/*Creates and focuses the impost stl window*/
+void showImportSTLWindow(){
+  Component * floatingWindow = importSTLWindow;
+  if (floatingWindow == NULL){
+    floatingWindow = createFloatingWindow();
+    floatingWindow->onKeyPress = handleImportSTLInput;
+    importSTLWindow = floatingWindow;
+    updateComponent(floatingWindow, 1);
+  }
+
+  focusBuffer(floatingWindow);
+}
+
+Component * createFloatingWindow(){
+  Component * floatWindow = newContainerCmp();
+  floatWindow->height = parentComponent.real_height;
+  floatWindow->width = parentComponent.real_width;
+  floatWindow->real_width = parentComponent.real_width;
+  floatWindow->real_height = parentComponent.real_height;
+  floatWindow->x = 0;
+  floatWindow->y = 0;
+  floatWindow->isUpdated = 3;
+  floatWindow->component_type = container_t;
+  floatWindow->backgroundColor = BG_COLOR_HIGHLIGHT2;
+  floatWindow->border = 1;
+  floatWindow->padding = 0;
+  floatWindow->parent = floatWindow;
+  //floatWindow->autoHeight = 2;
+  //loatWindow->autoWidth = 2;
+  //floatWindow->heightBias = 0.8f;
+  //floatWindow->widthBias = 0.8f;
+  floatWindow->container_properties.transparent = 1;
+  
+  floatWindow->childCount = 1;
+  floatWindow->children = malloc(sizeof(Component *) * 1);
+
+  Component * actualFloatWindow = newContainerCmp();
+  actualFloatWindow->autoHeight = 2;
+  actualFloatWindow->autoWidth = 2;
+  actualFloatWindow->heightBias = 0.8f;
+  actualFloatWindow->widthBias = 0.8f;
+  actualFloatWindow->border = 1;
+  actualFloatWindow->topToTopOf = floatWindow;
+  actualFloatWindow->bottomToBottomOf = floatWindow;
+  actualFloatWindow->startToStartOf = floatWindow;
+  actualFloatWindow->endToEndOf = floatWindow;
+  actualFloatWindow->parent = floatWindow;
+  actualFloatWindow->backgroundColor = BG_2_COLOR;
+  floatWindow->children[0] = actualFloatWindow;
+
+  return floatWindow;
+}
+
+
+
 /*Here starts the Library related functions*/
 int main() {
+  setbuf(stdout, NULL);
   DEBUG = 1;
   initUI();
   // getchar();
@@ -1844,7 +1932,7 @@ void initUI() {
   viewport = child;
   //viewport->actionHint = "wasd) Move camera    WASD) Rotate Camera    +-) Change multiplier    io) Zoom In/Out";
   insertString("wasd) Move camera    WASD) Rotate Camera    +-) Change multiplier    io) Zoom In/Out", &(viewport->actionHint));
-  insertString("", &(viewport->actionHint));
+  //insertString("", &(viewport->actionHint));
 
   /*Object Manager*/
   Component *objectContainer = parentComponent.children[3];
@@ -2016,49 +2104,15 @@ void initUI() {
 
   createAxis();
 
-  bufferStackLength = 2;
+  bufferStackLength = 1;
   bufferStack = malloc(sizeof(Component *) * bufferStackLength);
 
-  Component * floatWindow = newContainerCmp();
-  floatWindow->height = rows;
-  floatWindow->width = cols;
-  floatWindow->real_width = cols;
-  //floatWindow->real_height = rows;
-  floatWindow->x = 0;
-  floatWindow->y = 0;
-  floatWindow->isUpdated = 3;
-  floatWindow->component_type = container_t;
-  floatWindow->backgroundColor = BG_COLOR_HIGHLIGHT2;
-  floatWindow->border = 1;
-  floatWindow->padding = 0;
-  floatWindow->parent = floatWindow;
-  //floatWindow->autoHeight = 2;
-  //loatWindow->autoWidth = 2;
-  //floatWindow->heightBias = 0.8f;
-  //floatWindow->widthBias = 0.8f;
-  floatWindow->container_properties.transparent = 1;
-  
-  floatWindow->childCount = 1;
-  floatWindow->children = malloc(sizeof(Component *) * 1);
-  Component * actualFloatWindow = newContainerCmp();
-  actualFloatWindow->autoHeight = 2;
-  actualFloatWindow->autoWidth = 2;
-  actualFloatWindow->heightBias = 0.8f;
-  actualFloatWindow->widthBias = 0.8f;
-  actualFloatWindow->border = 1;
-  actualFloatWindow->topToTopOf = floatWindow;
-  actualFloatWindow->bottomToBottomOf = floatWindow;
-  actualFloatWindow->startToStartOf = floatWindow;
-  actualFloatWindow->endToEndOf = floatWindow;
-  actualFloatWindow->parent = floatWindow;
-  actualFloatWindow->backgroundColor = BG_2_COLOR;
-  floatWindow->children[0] = actualFloatWindow;
   
 
 
   lowerBufferToUpdate = 0;
   bufferStack[0] = &parentComponent;
-  bufferStack[1] = floatWindow;
+  //bufferStack[1] = floatWindow;
 
 }
 
@@ -2404,7 +2458,7 @@ int handleInput() {
     }
     if (charUpdated) debug("Char presser: %c", ch);
     // Pass the event to the focused component
-    if (focusComponent == NULL) handleInputNoFocus(ch);
+    if (focusComponent == NULL || focusComponent == &parentComponent) handleInputNoFocus(ch);
     else focusComponent->onKeyPress(focusComponent, ch);
   }
   return 0;
@@ -2558,6 +2612,7 @@ void printText(int x, int y, char *text, Color bg, Color fg, Component * compone
 
 void drawViewport(Component *component, Component *parent, int forceDraw) {
 
+  debug("Calling draw viewport");
   int updated = 0;
   if (component->isUpdated > 0 || forceDraw) {
     updated = 1;
@@ -2598,7 +2653,6 @@ void drawViewport(Component *component, Component *parent, int forceDraw) {
       vp_init_viewport(component->viewport_properties.vp_settings);
     }
 
-    debug("Drawing viewport");
     debug("%dx, %dy", component->viewport_properties.vp_settings->x,
           component->viewport_properties.vp_settings->y);
     Camera myCam = component->viewport_properties.vp_settings->render_settings->active_camera;
@@ -2611,7 +2665,13 @@ void drawViewport(Component *component, Component *parent, int forceDraw) {
     for (int i = 0; i< bufferStackLength; i++){
       if (rootCmp == bufferStack[i]){
         if (bufferStackLength == (i+1)){
+          debug("Actually drawing viewport");
           vp_render_viewport(component->viewport_properties.vp_settings);
+          debug("Actually drawed viewport");
+        }
+        else{
+          debug("Cleaning up viewport");
+          vp_delete_frame();
         }
         break;
       }
@@ -4609,6 +4669,7 @@ ComponentTable newComponentTable(Component *cmp) {
   retTable.length = 1;
   return retTable;
 }
+
 /*******************************************************************/
 /********************* Utility functions **************************/
 /*******************************************************************/
@@ -4787,9 +4848,21 @@ void clearPrintBuffer(Component * component){
 }
 
 void printBuffer(Component * component){
-  fwrite(*component->printBuffer, sizeof(char), strlen(*component->printBuffer), stdout);
+  size_t total_length = strlen(*component->printBuffer);
+  size_t offset = 0;
+  while (total_length > offset){
+    size_t written = fwrite(*component->printBuffer, sizeof(char), strlen(*component->printBuffer), stdout);
+    if (written == 0){
+      if (ferror(stdout)){
+        clearerr(stdout);
+        usleep(100);
+        continue;
+      }
+      break;
+    }
+    offset += written;
+  }
   //printf("%s", *component->printBuffer);
-
   fflush(stdout);
 }
 
@@ -4803,6 +4876,7 @@ Component * getRootComponent(Component * component){
 
 void focusBuffer(Component * rootComponent){
   //Searchs for the buffer in the stack
+  debug("Focusing buffer %d", rootComponent);
   int rootPosition = -1;
   for (int i = 0; i<bufferStackLength; i++){
     if (bufferStack[i] == rootComponent){
@@ -4817,11 +4891,20 @@ void focusBuffer(Component * rootComponent){
     memmove(bufferStack + rootPosition,
             bufferStack + rootPosition +1,
             bufferStackLength - rootPosition-1);
+
   }else{
     //Adds the stack at front if not exists
     bufferStackLength += 1;
     bufferStack = realloc(bufferStack, sizeof(Component *) * bufferStackLength);
   }
+
+  bufferStack[bufferStackLength-1] = rootComponent;
+  debug("Final buffer stack");
+  for (int i = 0; i< bufferStackLength; i++){
+    debug("  %d", bufferStack[i]);
+  }
+
+  focusComponent = rootComponent;
 
   //Do something here for forcing a draw
   redrawBuffers = 1;
@@ -4837,4 +4920,110 @@ int findBufferStackIndex(Component * rootComponent){
     }
   }
   return rootPosition;
+}
+
+void deleteBufferStackComponent(Component * rootComponent){
+  //Searchs for the buffer in the stack
+  int rootPosition = -1;
+  for (int i = 0; i<bufferStackLength; i++){
+    if (bufferStack[i] == rootComponent){
+      rootPosition = i;
+      break;
+    }
+  }
+  if (rootPosition == -1) return;
+
+  //Moves the stack at front if exists
+  if (rootPosition != (bufferStackLength-1)){
+    memmove(bufferStack + rootPosition,
+            bufferStack + rootPosition +1,
+            bufferStackLength - rootPosition-1);
+  }
+
+  bufferStackLength--;
+  bufferStack = realloc(bufferStack, bufferStackLength);
+
+  if (rootPosition == 0){
+    focusComponent = bufferStack[0];
+  }
+
+  deleteComponent(rootComponent); 
+  redrawBuffers = 1;
+
+}
+
+void deleteComponent(Component * component){
+  //Clear the print buffer
+  clearPrintBuffer(component);
+
+  //Free hints
+  if (component->actionHint != NULL){
+      free(component->actionHint);
+  }
+  if (component->modeHint != NULL){
+      free(component->modeHint);
+  }
+
+  //Per object type free
+  //container_t, viewport_t, tabview_t, text_t, treeview_t, settings_t
+  switch(component->component_type){
+    case container_t:
+    case viewport_t:
+      break;
+    case tabview_t:
+      clearStringTable(&(component->tabview_properties.tabTitles));
+      break;
+
+    case text_t:
+      if (component->text_properties.content != NULL){
+        free(component->text_properties.content);
+      }
+      break;
+
+    case treeview_t:
+      //Iterate over every tree view element
+      TreeViewElement * treeElem = component->treeview_properties.child;
+      while (treeElem != NULL){
+        //Free string table
+        clearStringTable(&treeElem->texts);
+        //Free the text component
+        deleteComponent(treeElem->textComponent);
+
+        treeElem = treeElem->nextElement;
+        free(treeElem->prevElement);
+      }
+      break;
+
+    case settings_t:
+      SettingsElement * settingElement = component->settings_properties.child;
+      while (settingElement != NULL){
+        //Free text component
+        if (settingElement->textComponent != NULL){
+          deleteComponent(settingElement->textComponent);
+        }
+        switch(settingElement->fieldType){
+          case line_text_s:
+            free(settingElement->line_text_data.textContent);
+            break;
+          case list_s:
+            if(settingElement->list_data.hintMessage != NULL){
+              free(settingElement->list_data.hintMessage);
+            }
+            clearStringTable(&settingElement->list_data.entries);
+            break;
+          default:
+            break;
+        }
+        settingElement = settingElement->nextElement;
+        free(settingElement->previousElement);
+      }
+  }
+
+  //Remove the children
+  for (int i = 0; i<component->childCount; i++){
+    deleteComponent(component->children[i]);
+  }
+
+  //Remove the actual component
+  free(component);
 }
