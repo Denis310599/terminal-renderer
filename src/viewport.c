@@ -246,6 +246,8 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 
 	Vector3d point[4];
 	Object meshObject;
+	meshObject.p_malla = NULL;
+	meshObject.material = NULL;
 	meshObject.tipo = Malla;
 	meshObject.material = malloc(sizeof(Material));
 	meshObject.material->color = (Vector3d) {0.8* rand()/(float) RAND_MAX,

@@ -63,7 +63,6 @@ int debug_lock = 1;
 FILE *debugFile;
 
 void debug(char *  msg, ...){
-
 	va_list argPtr;
 	if(DEBUG){
 		//printf("[DEBUG]");
@@ -290,10 +289,12 @@ void resizeWindow(ViewportSettings * viewport_settings){
 
 	//I dont know if this will fail, don't know if this address won't be accessed by other part of the program
 	//spoiler: it failed, but i fixed it
-	if (*(viewport_settings->pixel_data_buffer) != NULL){
+	if (viewport_settings->pixel_data_buffer != NULL &&
+		*(viewport_settings->pixel_data_buffer) != NULL){
 		free(*(viewport_settings->pixel_data_buffer));
 	}
-	if (*(viewport_settings->gpu_frame_buffer) != NULL){
+	if (viewport_settings->gpu_frame_buffer != NULL &&
+			*(viewport_settings->gpu_frame_buffer) != NULL){
 		free(*(viewport_settings->gpu_frame_buffer));
 	}
 	free(viewport_settings->pixel_data_buffer);
@@ -515,7 +516,8 @@ unsigned int setUpShader(char * pathToFragment, char * pathToVertex){
 		fseek (f, 0, SEEK_END);
 		lengthF = ftell (f);
 		fseek (f, 0, SEEK_SET);
-		fShaderCode= malloc (lengthF);
+		fShaderCode= malloc (lengthF +1);
+		fShaderCode[lengthF] = '\0';
 		if (fShaderCode)
 		{
 			fread (fShaderCode, 1, lengthF, f);
@@ -528,7 +530,8 @@ unsigned int setUpShader(char * pathToFragment, char * pathToVertex){
 		fseek (v, 0, SEEK_END);
 		lengthV = ftell (v);
 		fseek (v, 0, SEEK_SET);
-		vShaderCode= malloc (lengthV);
+		vShaderCode= malloc (lengthV +1);
+		vShaderCode[lengthV] = '\0';
 		if (vShaderCode)
 		{
 			fread (vShaderCode, 1, lengthV, v);
@@ -566,6 +569,9 @@ unsigned int setUpShader(char * pathToFragment, char * pathToVertex){
 	// delete the shaders as they're linked into our program now and no longer necessary
 	glDeleteShader(vertexShader);
 	glDeleteShader(fragmentShader);
+
+	if (vShaderCode) free(vShaderCode);
+	if (fShaderCode) free(fShaderCode);
 
 	return ID;
 }
@@ -1567,7 +1573,7 @@ Polygon newPolygon(Vector3d p1, Vector3d p2, Vector3d p3, Vector3d normal){
 }
 
 Mesh * newMesh(Polygon * polygonArray, int n_polygon, Vector3d scale, Vector3d position){
-	Mesh * m = malloc(sizeof(int) + sizeof(Polygon) * n_polygon);
+	Mesh * m = malloc(2*sizeof(int) + sizeof(Polygon) * n_polygon);
 	for (int i = 0; i < n_polygon; i++){
 		m->polygons[i] = polygonArray[i];
 		m->polygons[i].p1 = m->polygons[i].p1;//vect_element_product(vect_sum(m->polygons[i].p1, position, 1), scale);//vect_sum(vect_element_product(m->polygons[i].p1, scale), position, 1);

@@ -1,9 +1,13 @@
+#include <asm-generic/errno-base.h>
+#include <asm-generic/errno.h>
 #include <asm-generic/ioctls.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +15,9 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+#include <regex.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "../include/cglm/cglm.h"
 
 #include "../include/renderer.h"
@@ -254,6 +261,12 @@ typedef struct ComponentTable {
   Component **table;
 } ComponentTable;
 
+typedef struct {
+  char * local_path;
+  char * path;
+  bool is_folder;
+} FileEntry;
+
 /*Function declaration*/
 void initUI();
 void drawUI();
@@ -285,14 +298,14 @@ void preCalculateComponent(Component *component, Component *parent);
 void calculateTextComponent(Component *component);
 void preCalculateTreeViewComponent(Component *component);
 
-Component *newContainer();
-Component *newContainerCmp();
-Component *newViewport();
-Component *newTabView();
-Component *newTextComponent(char *text);
+Component *newContainer(Component * parent);
+Component *newContainerCmp(Component * parent);
+Component *newViewport(Component * parent);
+Component *newTabView(Component * parent);
+Component *newTextComponent(char *text, Component * parent);
 TreeViewElement *newTreeViewElement(TreeViewElement *parent, int isChild);
-Component *newTreeViewComponent();
-Component * newSettingsComponent();
+Component *newTreeViewComponent(Component * parent);
+Component * newSettingsComponent(Component * parent);
 SettingsElement * newSettingsElement(char * title, SettingsElement * prevElement, SettingsElement * nextElement);
 SettingsElement * newSettingsTitleElement(char * content, SettingsElement * prevElement, SettingsElement * nextElement);
 SettingsElement * newSettingsNumberInput(char * title, int isFloat, SettingsElement * prevElement, SettingsElement * nextElement);
@@ -304,6 +317,7 @@ Color *newColor(uint8_t r, uint8_t g, uint8_t b);
 int handleInput();
 int handleDefaultInput(Component * cmp, char keypress);
 void handleInputNoFocus(char keypress);
+int defaultTreeViewInputHandler(Component *component, char keypress);
 int handleTreeViewInput(Component *component, char keypress);
 int handleSettingInput(Component *component, char keypress);
 int handleSettingsNumberFieldKeypress(Component * component, char keypress);
@@ -337,8 +351,12 @@ TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
 void loadNewObject(char * uri, int format);
 void rotateObject(Object * object, vec3 axis, float angle);
 void createAxis();
+FileEntry * scan_directory(const char *folder_path, const char *regex_filter, bool include_dirs, size_t *out_count);
+void free_scan_results(FileEntry *results, size_t count);
+int isFolder(char * path);
 Component * createFloatingWindow();
 void showImportSTLWindow();
+void scanAndFillDirectoryTreeView(char * path, Component * treeView);
 
 /*Custom function declaration(aka handlers)*/
 int handleObjectManajerKeyPress(Component *component, char keypress);
@@ -350,6 +368,7 @@ void calculateCommnandHintViewport();
 Component * getRootComponent(Component * component);
 int findBufferStackIndex(Component * rootComponent);
 void deleteComponent(Component * component);
+void clearTreeViewElements(Component * treeView);
 void deleteBufferStackComponent(Component * rootComponent);
 void focusBuffer(Component * rootComponent);
 int handleImportSTLInput(Component * rootComponent, char keypress);
@@ -505,6 +524,111 @@ void handleObjectPropertiesUpdate(int position, SettingsElement * settingElement
   if (updated) updateComponent(viewport, 0);
 }
 
+
+int defaultTreeViewInputHandler(Component *component, char keypress) {
+  debug("Handling keypress in TreeView (default)");
+  int updateThisCMP = 0;
+  int inputHandled = 1;
+  if (component->isVisible == 0){
+    return 0;
+  } 
+  int redrawWholeComponent = 0;
+  Component * selectedCmp;
+  // For moving, if hightLight mode 0: regular up and down
+  // if highLight mode 1: Jump across brothers and auto jump to parents and
+  // uncles
+
+  if (component->treeview_properties.child == NULL
+      && keypress != 27 && keypress != 'n'){
+    return 1;
+  }
+  switch (keypress) {
+    case 'k':
+      updateThisCMP = 1;
+      if (component->treeview_properties.highlightMode == 0) {
+        // Previous showed element (not inside collapsed)
+        component->treeview_properties.selectedElement =
+            getPrevTreeViewElement(component->treeview_properties.selectedElement,
+                                   1) != NULL
+                ? getPrevTreeViewElement(
+                      component->treeview_properties.selectedElement, 1)
+                : component->treeview_properties.selectedElement;
+      } else {
+        // Previous sibling
+        TreeViewElement *possibleNextElement = getPrevTreeViewElement(
+            component->treeview_properties.selectedElement, 2);
+        if (possibleNextElement != NULL &&
+            possibleNextElement->parentElement ==
+                component->treeview_properties.selectedElement->parentElement)
+          component->treeview_properties.selectedElement = possibleNextElement;
+      }
+      break;
+    case 'j':
+      updateThisCMP = 1;
+      if (component->treeview_properties.highlightMode == 0) {
+        // Next showed element (not inside collapsed)
+        TreeViewElement * auxElement = getNextTreeViewElement(
+                component->treeview_properties.selectedElement,
+                component->treeview_properties.selectedElement->collapsed);
+
+        component->treeview_properties.selectedElement =
+                auxElement != NULL
+                ? auxElement
+                : component->treeview_properties.selectedElement;
+      } else {
+        // Next sibling
+        TreeViewElement *possibleNextelement = getNextTreeViewElement(
+            component->treeview_properties.selectedElement, 1);
+        if (possibleNextelement != NULL &&
+            possibleNextelement->parentElement ==
+                component->treeview_properties.selectedElement->parentElement)
+          component->treeview_properties.selectedElement = possibleNextelement;
+      }
+      break;
+    case 'l':
+      updateThisCMP = 1;
+      if (component->treeview_properties.highlightMode == 1) {
+        // Set inside
+        if (component->treeview_properties.selectedElement->childElement !=
+            NULL) {
+          if(component->treeview_properties.selectedElement->collapsed == 1) redrawWholeComponent = 1;
+          component->treeview_properties.selectedElement->collapsed = 0;
+          component->treeview_properties.selectedElement =
+              component->treeview_properties.selectedElement->childElement;
+        }
+      }
+      break;
+    case 'h':
+      updateThisCMP = 1;
+      if (component->treeview_properties.highlightMode == 1) {
+        // Set outsied
+        if (component->treeview_properties.selectedElement->parentElement !=
+            NULL) {
+          component->treeview_properties.selectedElement =
+              component->treeview_properties.selectedElement->parentElement;
+        }
+      }
+      break;
+    case 'o':
+      updateThisCMP = 1;
+      if (component->treeview_properties.selectedElement->childElement != NULL) {
+        redrawWholeComponent = 1;
+        component->treeview_properties.selectedElement->collapsed =
+            !component->treeview_properties.selectedElement->collapsed;
+      }
+      break;
+    default:
+      inputHandled = 0;
+    }
+
+    if (updateThisCMP) {
+      updateComponent(component, 0);
+      //updateComponent(component->parent, 0);
+      //updateComponent(getRootComponent(component), 1);
+      debug("New selected element: %d", component->treeview_properties.selectedElement);
+    }
+    return inputHandled;
+  }
 
 /*Function that handles the tree view of the object manager*/
 int handleTreeViewInput(Component *component, char keypress) {
@@ -737,7 +861,7 @@ int handleTreeViewInput(Component *component, char keypress) {
     objectManagerData->lastSelectedElement = selectedTreeElem;
     updateComponent(viewport, 0);
   }
-  if (selectedTreeElem != NULL){
+  if (selectedTreeElem != NULL && selectedTreeElem->data != NULL){
     selectedObject = (Object *) selectedTreeElem->data;
   }
 
@@ -1152,6 +1276,10 @@ int handleViewportInput(Component * component, char keypress){
 int handleImportSTLInput(Component * rootComponent, char keypress){
   debug("Handling keypress on ImportSTL. Input: %c", keypress);
   int keyHandled = 1;
+  Component * actualFloatingWindow = rootComponent->children[0];
+  Component * urlBox = actualFloatingWindow->children[0];
+  Component * treeView = actualFloatingWindow->children[1];
+  Component * viewport = actualFloatingWindow->children[2];
   
   // Try to handle with children
 
@@ -1163,6 +1291,20 @@ int handleImportSTLInput(Component * rootComponent, char keypress){
         deleteBufferStackComponent(importSTLWindow);
         focusComponent = objectManagerComponent;
         importSTLWindow = NULL;
+        break;
+      case 'j':
+      case 'k':
+        keyHandled = defaultTreeViewInputHandler(treeView, keypress);
+        break;
+      case 'l':
+        char * pathToScan = ((char *) (treeView->treeview_properties.selectedElement->data));
+        debug("Path to scan %s", pathToScan);
+        if (isFolder(pathToScan)){
+          scanAndFillDirectoryTreeView(pathToScan, treeView);
+        }
+        break;
+      case 'h':
+        scanAndFillDirectoryTreeView(treeView->treeview_properties.child->data, treeView);
         break;
       default:
         keyHandled = 0;
@@ -1661,6 +1803,56 @@ void showImportSTLWindow(){
   Component * floatingWindow = importSTLWindow;
   if (floatingWindow == NULL){
     floatingWindow = createFloatingWindow();
+    Component * actualFloatingWindow = floatingWindow->children[0];
+    //Create the actual floating window content
+    //Search URL
+    Component * urlBox = newContainerCmp(actualFloatingWindow);
+    urlBox->height = 3;
+    urlBox->border = 1;
+    urlBox->autoWidth = 2;
+    urlBox->topToTopOf = actualFloatingWindow;
+    urlBox->startToStartOf = actualFloatingWindow;
+    urlBox->endToEndOf = actualFloatingWindow;
+    urlBox->childCount = 1;
+    urlBox->children = malloc(sizeof(Component*)*urlBox->childCount);
+
+    Component * urlTitle = newTextComponent(" URL ", actualFloatingWindow);
+    urlTitle->topToTopOf = urlBox;
+    urlTitle->startToStartOf = urlBox;
+    urlTitle->marginStart = 3;
+
+    urlBox->children[0] = urlTitle;
+
+    Component * treeView = newTreeViewComponent(actualFloatingWindow);
+    treeView->topToBottomOf = urlBox;
+    treeView->startToStartOf = actualFloatingWindow;
+    treeView->bottomToBottomOf = actualFloatingWindow;
+    treeView->endToEndOf = actualFloatingWindow;
+    treeView->autoHeight = 2;
+    //treeView->autoWidth = 2;
+    treeView->autoWidth = 2;
+    treeView->widthBias = 0.5;
+    treeView->xBias = 0;
+
+    //Fill tree view
+    scanAndFillDirectoryTreeView("~", treeView);
+
+    Component * viewport = newContainerCmp(actualFloatingWindow);
+    viewport->endToEndOf = actualFloatingWindow;
+    viewport->topToBottomOf = urlBox;
+    viewport->bottomToBottomOf = actualFloatingWindow;
+    viewport->endToEndOf = actualFloatingWindow;
+    viewport->startToEndOf = treeView;
+    viewport->autoHeight = 2;
+    viewport->autoWidth = 2;
+
+    actualFloatingWindow->childCount = 3;
+    actualFloatingWindow->children = malloc(sizeof(Component * ) * actualFloatingWindow->childCount);
+    actualFloatingWindow->children[0] = urlBox;
+    actualFloatingWindow->children[1] = treeView;
+    actualFloatingWindow->children[2] = viewport;
+
+
     floatingWindow->onKeyPress = handleImportSTLInput;
     importSTLWindow = floatingWindow;
     updateComponent(floatingWindow, 1);
@@ -1669,8 +1861,58 @@ void showImportSTLWindow(){
   focusBuffer(floatingWindow);
 }
 
+/**
+ * @brief Scans a directory and fills a tree view based on that data
+ *
+ * @param path Path to the directory to scan
+ * @param treeView TreeView component to fill
+ */
+void scanAndFillDirectoryTreeView(char * path, Component * treeView){
+  //Populate the treeView
+  size_t files_count = 0;
+  FileEntry * files = scan_directory(path, "", true, &files_count);
+  debug("Files found: %d", files_count);
+  TreeViewElement * parentElement = treeView->treeview_properties.child;
+
+  // Clear tree view
+  if (treeView->treeview_properties.child != NULL){
+    clearTreeViewElements(treeView);
+    parentElement = NULL;
+  }
+  int showingFolders = 1;
+  while (1){
+    for (int i = 0; i < files_count; i++){
+      if (files[i].is_folder && !showingFolders) continue;
+      if (!files[i].is_folder && showingFolders) continue;
+      debug("Inserting folder/file %s", files[i].path);
+      TreeViewElement * element = newTreeViewElement(parentElement, false);
+      if (treeView->treeview_properties.child == NULL){
+        treeView->treeview_properties.child = element;
+        treeView->treeview_properties.selectedElement = element;
+      }
+
+      element->data = strdup("Hello");
+      insertString(files[i].path, (char**)(&element->data));
+      char auxName[1024];
+      if (files[i].is_folder){
+        sprintf(auxName, "󰉋 %s", files[i].local_path);
+      }else{
+        sprintf(auxName, "%s", files[i].local_path);
+      }
+      addStringToTable(auxName, &element->texts);
+      parentElement = element;
+      //element->texts
+
+    }
+    if (showingFolders == 1) showingFolders = 0;
+    else break;
+  }
+  updateComponent(treeView, 1);
+  free_scan_results(files,files_count);
+}
+
 Component * createFloatingWindow(){
-  Component * floatWindow = newContainerCmp();
+  Component * floatWindow = newContainerCmp(NULL);
   floatWindow->height = parentComponent.real_height;
   floatWindow->width = parentComponent.real_width;
   floatWindow->real_width = parentComponent.real_width;
@@ -1679,25 +1921,22 @@ Component * createFloatingWindow(){
   floatWindow->y = 0;
   floatWindow->isUpdated = 3;
   floatWindow->component_type = container_t;
-  floatWindow->backgroundColor = BG_COLOR_HIGHLIGHT2;
-  floatWindow->border = 1;
+  floatWindow->backgroundColor = BG_DISABLE_COLOR;
+  floatWindow->border = 0;
   floatWindow->padding = 0;
   floatWindow->parent = floatWindow;
-  //floatWindow->autoHeight = 2;
-  //loatWindow->autoWidth = 2;
-  //floatWindow->heightBias = 0.8f;
-  //floatWindow->widthBias = 0.8f;
-  floatWindow->container_properties.transparent = 1;
+  floatWindow->container_properties.transparent = 0;
   
   floatWindow->childCount = 1;
   floatWindow->children = malloc(sizeof(Component *) * 1);
 
-  Component * actualFloatWindow = newContainerCmp();
+  Component * actualFloatWindow = newContainerCmp(floatWindow);
   actualFloatWindow->autoHeight = 2;
   actualFloatWindow->autoWidth = 2;
-  actualFloatWindow->heightBias = 0.8f;
-  actualFloatWindow->widthBias = 0.8f;
+  actualFloatWindow->heightBias = 0.9f;
+  actualFloatWindow->widthBias = 0.9f;
   actualFloatWindow->border = 1;
+  actualFloatWindow->padding = 1;
   actualFloatWindow->topToTopOf = floatWindow;
   actualFloatWindow->bottomToBottomOf = floatWindow;
   actualFloatWindow->startToStartOf = floatWindow;
@@ -1748,7 +1987,8 @@ void initUI() {
   // Prepares the terminal
   prepareTerminal();
 
-  parentComponent = *newContainerCmp();
+  parentComponent = *newContainerCmp(NULL);
+  parentComponent.parent = &parentComponent;
   // Calculates component table
   parentComponent.x = 0;
   parentComponent.y = 0;
@@ -1766,7 +2006,7 @@ void initUI() {
   parentComponent.padding = 0;
 
   /*Commands bar container*/
-  Component *child = newContainerCmp();
+  Component *child = newContainerCmp(&parentComponent);
   child->bottomToBottomOf = &parentComponent;
   child->marginTop = 0;
   child->startToStartOf = &parentComponent;
@@ -1784,7 +2024,7 @@ void initUI() {
 
 
 
-  Component * text = newTextComponent("Actions");
+  Component * text = newTextComponent("Actions", child);
   actionHintsComponent = text;
   actionHintsComponent->parent = child;
   text->topToTopOf = child;
@@ -1801,7 +2041,7 @@ void initUI() {
 
 
   /*Status bar container*/
-  child = newContainerCmp();
+  child = newContainerCmp(&parentComponent);
   child->bottomToTopOf = parentComponent.children[0];
   child->startToStartOf = &parentComponent;
   child->endToEndOf = &parentComponent;
@@ -1813,7 +2053,7 @@ void initUI() {
 
   parentComponent.children[1] = child;
 
-  Component * text3 = newTextComponent("");
+  Component * text3 = newTextComponent("", child);
   commandHintComponent = text3;
   text3->parent = child;
   text3->topToTopOf = child;
@@ -1827,7 +2067,7 @@ void initUI() {
 
 
   /*Top Menu container*/
-  child = newContainerCmp();
+  child = newContainerCmp(&parentComponent);
   child->topToTopOf = &parentComponent;
   child->startToStartOf = &parentComponent;
   child->endToEndOf = &parentComponent;
@@ -1840,7 +2080,7 @@ void initUI() {
   parentComponent.children[2] = child;
 
   /*Object container*/
-  child = newContainerCmp();
+  child = newContainerCmp(&parentComponent);
   child->topToBottomOf = parentComponent.children[2];
   child->bottomToTopOf = parentComponent.children[1];
   child->startToStartOf = &parentComponent;
@@ -1857,7 +2097,7 @@ void initUI() {
   parentComponent.children[3] = child;
 
   /*Main buttons container*/
-  child = newContainerCmp();
+  child = newContainerCmp(&parentComponent);
   child->topToBottomOf = parentComponent.children[2];
   child->startToStartOf = &parentComponent;
   child->endToStartOf = parentComponent.children[3];
@@ -1868,7 +2108,7 @@ void initUI() {
   child->backgroundColor = BG_2_COLOR;
   child->border = 0;
 
-  Component * text2 = newTextComponent("Modes");
+  Component * text2 = newTextComponent("Modes", child);
   modeHintsComponent = text2;
   text2->parent = child;
   text2->topToTopOf = child;
@@ -1883,7 +2123,7 @@ void initUI() {
   parentComponent.children[4] = child;
 
   /*Viewport container*/
-  child = newContainerCmp();
+  child = newContainerCmp(&parentComponent);
   child->topToBottomOf = parentComponent.children[4];
   child->startToStartOf = &parentComponent;
   child->endToStartOf = parentComponent.children[3];
@@ -1900,7 +2140,7 @@ void initUI() {
   parentComponent.children[5] = child;
 
   /*viewport*/
-  child = newViewport();
+  child = newViewport(parentComponent.children[5]);
   child->topToTopOf = parentComponent.children[5];
   child->startToStartOf = parentComponent.children[5];
   child->endToEndOf = parentComponent.children[5];
@@ -1940,7 +2180,7 @@ void initUI() {
   objectContainer->children = malloc(sizeof(Component *));
   objectContainer->childCount = 1;
 
-  objectContainer->children[0] = newTabView();
+  objectContainer->children[0] = newTabView(objectContainer->children[0]);
   objectContainer->children[0]->topToTopOf = objectContainer;
   objectContainer->children[0]->bottomToBottomOf = objectContainer;
   objectContainer->children[0]->startToStartOf = objectContainer;
@@ -1959,7 +2199,7 @@ void initUI() {
   tabView->children = malloc(sizeof(Component *) * 2);
   tabView->childCount = 2;
 
-  tabView->children[0] = newContainerCmp();
+  tabView->children[0] = newContainerCmp(tabView);
 
   tabView->children[0]->topToTopOf = tabView;
   tabView->children[0]->bottomToBottomOf = tabView;
@@ -1971,7 +2211,7 @@ void initUI() {
 
   tabView->children[0]->children = malloc(sizeof(Component *)*2);
   tabView->children[0]->childCount = 2;
-  tabView->children[0]->children[0] = newTreeViewComponent();
+  tabView->children[0]->children[0] = newTreeViewComponent(tabView->children[0]);
   Component *treeView = tabView->children[0]->children[0];
   treeView->topToTopOf = tabView->children[0];
   treeView->bottomToBottomOf = tabView->children[0];
@@ -1995,13 +2235,12 @@ void initUI() {
 
 
   /*Object properties component*/
-  Component * objectPropertiesCmp = newSettingsComponent();
+  Component * objectPropertiesCmp = newSettingsComponent(tabView->children[0]);
   tabView->children[0]->children[1] = objectPropertiesCmp;
   objectPropertiesCmp->topToTopOf = tabView->children[0];
   objectPropertiesCmp->bottomToBottomOf = tabView->children[0];
   objectPropertiesCmp->startToStartOf = tabView->children[0];
   objectPropertiesCmp->endToEndOf = tabView->children[0];
-  objectPropertiesCmp->parent = tabView->children[0];
   objectPropertiesComponent = objectPropertiesCmp;
 
   objectPropertiesCmp->autoHeight = 2;
@@ -2066,7 +2305,7 @@ void initUI() {
   */
 
   /*Material tab*/
-  tabView->children[1] = newContainerCmp();
+  tabView->children[1] = newContainerCmp(tabView);
   tabView->children[1]->topToTopOf = tabView;
   tabView->children[1]->bottomToBottomOf = tabView;
   tabView->children[1]->endToEndOf = tabView;
@@ -2084,7 +2323,7 @@ void initUI() {
   Component *matCont = tabView->children[1];
   matCont->childCount = 1;
   matCont->children = malloc(sizeof(Container *));
-  Component * text1 = newTextComponent("Materials tab is under development");
+  Component * text1 = newTextComponent("Materials tab is under development", matCont);
   text1->topToTopOf = matCont;
   text1->bottomToBottomOf = matCont;
   text1->startToStartOf = matCont;
@@ -2310,9 +2549,9 @@ void updateAxis(){
 
 void prepareTerminal() {
   // Swaps buffer
-  printf("\033[?1049h");
+  //printf("\033[?1049h");
   fflush(stdout);
-  printf("\033[?25l");
+  //printf("\033[?25l");
   fflush(stdout);
 
   // Enable raw input mode
@@ -2341,12 +2580,18 @@ void handle_resize(int a) {
 }
 
 void updateComponent(Component *component, int resize) {
+  debug("Updating component %d", component);
   if (resize == 1) {
     markComponentResized(getRootComponent(component));
     redrawBuffers = 1;
+    debug("Marked component %s as resized", component);
   }else{
     int auxBuffIdex = findBufferStackIndex(getRootComponent(component));
-    if ( auxBuffIdex != -1 && auxBuffIdex < lowerBufferToUpdate){
+    debug("Update req on cmp at buffer %d. Lowest buffer to update: %d", auxBuffIdex, lowerBufferToUpdate);
+    if ( auxBuffIdex != -1 &&
+        (lowerBufferToUpdate == -1 || 
+         auxBuffIdex < lowerBufferToUpdate)){
+      debug("Marking component as updated on buffer %d", auxBuffIdex);
       lowerBufferToUpdate = auxBuffIdex;
     }
   }
@@ -2400,7 +2645,9 @@ void restoreTerminal() {
 void enable_raw_mode() {
   struct termios term;
   tcgetattr(STDIN_FILENO, &term);          // Get terminal settings
-  term.c_lflag &= ~(ICANON | ECHO);        // Disable canonical mode & echo
+  term.c_lflag &= ~(ICANON | ECHO | ISIG);        // Disable canonical mode & echo
+  term.c_cc[VMIN] = 0;
+  term.c_cc[VTIME] = 0;
   tcsetattr(STDIN_FILENO, TCSANOW, &term); // Apply changes
 }
 
@@ -2418,7 +2665,12 @@ void set_nonblocking_mode() {
 
 int handleInput() {
   char ch;
-  if (read(STDIN_FILENO, &ch, 1) > 0) {
+  int readRes = read(STDIN_FILENO, &ch, 1);
+  
+  //EAGAIN
+  //debug("ReadRes: %d", readRes);
+
+  if (readRes > 0) {
     debug("Char presser: %c", ch);
     int charUpdated = 1;
     switch (ch) {
@@ -2758,7 +3010,7 @@ void drawTabView(Component *component, Component *parent, int forceDraw) {
       titleLength = max_titleLength >= (titleLength - auxOffset)
                         ? (titleLength - auxOffset)
                         : max_titleLength;
-      char *title = malloc(sizeof(char) * titleLength);
+      char *title = malloc(sizeof(char) * (titleLength+1));
       // strncpy(title, component->tabview_properties.tabTitles.table[i],
       // titleLength);
       debug(".. titleLength: %d", titleLength);
@@ -2838,7 +3090,7 @@ void drawTextComponent(Component *component, int forceDraw) {
     char *finalString = malloc(sizeof(char) * (strlen(stringToPrint) * 2) + 1);
     strcpy(finalString, "");
     debug("Final string: %s", finalString);
-    char *wordToPrint = malloc(sizeof(char) * strlen(stringToPrint));
+    char *wordToPrint = malloc(sizeof(char) * (strlen(stringToPrint) +1));
     char *currentColor = malloc(sizeof(char) * strlen(stringToPrint));
     int calculatedHeight = 1;
     int wordOffset = 0;
@@ -3082,6 +3334,9 @@ void drawTreeView(Component *component, int forceDraw) {
                        strlen(current->texts.table[2]) + 10;
         if (textSize < (component->real_width - hierarchyLevel * 3))
           textSize = component->real_width + 1 - hierarchyLevel * 3;
+        if (textElement->text_properties.content != NULL){
+          free(textElement->text_properties.content);
+        }
         textElement->text_properties.content =
             malloc(sizeof(char) * (textSize));
         memset(textElement->text_properties.content, ' ', textSize - 1);
@@ -3245,8 +3500,7 @@ void drawSettingsComponent(Component *component, int forceDraw) {
     fflush(stdout);
     text[text_len] = ' ';
     if (textComponent == NULL){
-      textComponent = newTextComponent(text);
-      textComponent->parent = component;
+      textComponent = newTextComponent(text, component);
     }else{
       if(textComponent->text_properties.content != NULL){
         free(textComponent->text_properties.content);
@@ -3593,7 +3847,14 @@ void drawUI() {
   if (cmpsToUpdate.length > 0){
     debug("There are components to update");
     updatingHints = 1;
-    calculateHintMessages(NULL, NULL, NULL, 0);
+    
+    //Only update hints when parent component buffer updated
+    for (int i = 0; i < cmpsToUpdate.length; i++){
+      if (getRootComponent(cmpsToUpdate.table[i]) == &parentComponent){
+        calculateHintMessages(NULL, NULL, NULL, 0);
+        break;
+      }
+    }
 
     for (int i = 0; i<bufferStackLength; i++){
       calculateComponentDimensions(bufferStack[i], bufferStack[i]);
@@ -3626,6 +3887,7 @@ void drawUI() {
 
   
   if (redrawBuffers){
+    debug("Redrawing buffers");
     redrawBuffers = 0;
     for (int i = 0; i<bufferStackLength; i++){
       Component * auxParentCmp = bufferStack[i]->parent;
@@ -3634,8 +3896,14 @@ void drawUI() {
       drawComponent(bufferStack[i], bufferStack[i], 1);
     }
   }else if(lowerBufferToUpdate != -1){
-      debug("Drawing buffer %d (Regular)", lowerBufferToUpdate);
-    drawComponent(bufferStack[lowerBufferToUpdate], bufferStack[lowerBufferToUpdate], 0);
+    debug("Drawing only needed buffers");
+    debug("Drawing buffer %d (Regular)", lowerBufferToUpdate);
+    for (int i = 0; i < cmpsToUpdate.length; i++){
+      if (getRootComponent(cmpsToUpdate.table[i]) == bufferStack[lowerBufferToUpdate]){
+        drawComponent(cmpsToUpdate.table[i], cmpsToUpdate.table[i]->parent, 0);
+      }
+    }
+    //drawComponent(bufferStack[lowerBufferToUpdate], bufferStack[lowerBufferToUpdate], 0);
     for (int i = lowerBufferToUpdate+1; i<bufferStackLength; i++){
       Component * auxParentCmp = bufferStack[i]->parent;
       if (bufferStack[i] == &parentComponent) auxParentCmp = &parentComponent;
@@ -4186,7 +4454,7 @@ void calculateComponentDimensionsWidth(Component *component,
       min_x = component->startToEndOf->real_width;
     } else {
       min_x =
-          component->startToEndOf->x + component->startToEndOf->real_width + 1;
+          component->startToEndOf->x + component->startToEndOf->real_width;
     }
     min_x += componentMarginStart;
   } else if (component->endToEndOf == NULL && component->endToEndOf == NULL ||
@@ -4207,7 +4475,7 @@ void calculateComponentDimensionsWidth(Component *component,
     if (component->endToStartOf == parent) {
       auxHeight = 0;
     } else {
-      auxHeight = component->endToStartOf->x - 1;
+      auxHeight = component->endToStartOf->x;
     }
     auxHeight -= componentMarginStart;
     max_x = auxHeight < 0 ? 0 : auxHeight;
@@ -4374,7 +4642,7 @@ void calculateComponentDimensionsWidth(Component *component,
 /*******************************************************************/
 
 /*Creates a new container*/
-Component *newContainer() {
+Component *newContainer(Component * parent) {
   Component *cont = malloc(sizeof(Component));
   cont->x = 0;
   cont->y = 0;
@@ -4421,23 +4689,28 @@ Component *newContainer() {
   *(cont->printBuffer) = malloc(sizeof(char) * 1024);
   cont->printBufferSize = 1024;
   cont->writtenBufferSize = 0;
+  cont->parent = parent;
 
   return cont;
 }
 
-Component *newContainerCmp() {
+Component *newContainerCmp(Component * parent) {
   debug("Creating Container");
-  Component *cont = newContainer();
+  Component *cont = newContainer(parent);
   cont->container_properties.transparent = 0;
   return cont;
 }
-Component *newViewport() {
+Component *newViewport(Component * parent) {
   debug("Creating viewport");
-  Component *cont = newContainer();
+  Component *cont = newContainer(parent);
   cont->component_type = viewport_t;
   cont->viewport_properties.vp_settings = malloc(sizeof(ViewportSettings));
   cont->viewport_properties.vp_settings->near_clip = 1.0f;
   cont->viewport_properties.vp_settings->far_clip = 10000.0f;
+  cont->viewport_properties.vp_settings->pixel_data_buffer = NULL;
+  cont->viewport_properties.vp_settings->gpu_frame_buffer = NULL;
+  cont->viewport_properties.vp_settings->render_settings = NULL;
+  cont->viewport_properties.vp_settings->window = NULL;
 
   debug("Create Viewport");
   vp_create_viewport(cont->viewport_properties.vp_settings);
@@ -4449,9 +4722,9 @@ Component *newViewport() {
   return cont;
 }
 
-Component *newTabView() {
+Component *newTabView(Component * parent) {
   debug("\n\n***Creating tabView***");
-  Component *cont = newContainer();
+  Component *cont = newContainer(parent);
   cont->component_type = tabview_t;
 
   // cont->tabview_properties.iconStart = malloc(sizeof(char)*2);
@@ -4478,8 +4751,8 @@ Component *newTabView() {
 }
 
 /*Creates a new text component*/
-Component *newTextComponent(char *text) {
-  Component *cmp = newContainer();
+Component *newTextComponent(char *text, Component * parent) {
+  Component *cmp = newContainer(parent);
   cmp->component_type = text_t;
   // cmp->text_properties.content = malloc(sizeof(char) * strlen(text));
   // strcpy(cmp->text_properties.content, text);
@@ -4496,8 +4769,8 @@ Component *newTextComponent(char *text) {
 }
 
 /*Creates a new TreeViewComponent*/
-Component *newTreeViewComponent() {
-  Component *cmp = newContainer();
+Component *newTreeViewComponent(Component * parent) {
+  Component *cmp = newContainer(parent);
   cmp->component_type = treeview_t;
   cmp->treeview_properties.nColors = 8;
   cmp->treeview_properties.colors = malloc(sizeof(Color) * 8);
@@ -4513,6 +4786,7 @@ Component *newTreeViewComponent() {
 
   cmp->treeview_properties.child = NULL;
   cmp->treeview_properties.snapElement = 1;
+  cmp->treeview_properties.selectedElement = NULL;
   cmp->border = 0;
   cmp->isUpdated = 3;
 
@@ -4528,15 +4802,23 @@ TreeViewElement *newTreeViewElement(TreeViewElement *parent, int isChild) {
     parent->childElement = elem;
   elem->nextElement = NULL;
   elem->childElement = NULL;
+  elem->parentElement = NULL;
+  elem->prevElement = NULL;
   if (isChild == 1)
     elem->parentElement = parent;
-  else if (isChild == 0 && parent != NULL)
+  else if (isChild == 0 && parent != NULL){
     elem->parentElement = parent->parentElement;
-  if (isChild == 0)
     elem->prevElement = parent;
+  }
+  else if (isChild == 0 && parent == NULL){
+    elem->prevElement = parent;
+    elem->parentElement = parent;
+  }
   elem->collapsed = 0;
-  elem->textComponent = newTextComponent("");
+  elem->textComponent = newTextComponent("", NULL);
   elem->texts = newStringTable("-");
+  elem->status = 0;
+  elem->data = NULL;
 	//elem->isUpdated = 1;
   addStringToTable("+", &(elem->texts));
 
@@ -4544,8 +4826,8 @@ TreeViewElement *newTreeViewElement(TreeViewElement *parent, int isChild) {
 }
 
 /*Creates a new Settings component*/
-Component * newSettingsComponent() {
-  Component *cmp = newContainer();
+Component * newSettingsComponent(Component * parent) {
+  Component *cmp = newContainer(parent);
   cmp->component_type = settings_t;
   cmp->settings_properties.nColors = 8;
   cmp->settings_properties.colors = malloc(sizeof(Color) * 8);
@@ -4732,7 +5014,7 @@ void insertString(char * string, char ** pointer){
 /*Function that return next treeViewElement in order, not caring about height*/
 TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
                                         int collapsed) {
-  debug("Getting next TreeViewElement of %d", element);
+  debug("Getting next TreeViewElement of %d: %s", element, element->texts.length > 2 ? element->texts.table[2] : "");
   if (!collapsed && element->childElement != NULL)
     return element->childElement;
   else if (element->nextElement != NULL){
@@ -4941,11 +5223,12 @@ void deleteBufferStackComponent(Component * rootComponent){
   }
 
   bufferStackLength--;
-  bufferStack = realloc(bufferStack, bufferStackLength);
+  bufferStack = realloc(bufferStack, bufferStackLength*sizeof(Component *));
 
-  if (rootPosition == 0){
-    focusComponent = bufferStack[0];
-  }
+
+  //if (rootPosition == 0){
+  //  focusComponent = bufferStack[0];
+  //}
 
   deleteComponent(rootComponent); 
   redrawBuffers = 1;
@@ -4954,7 +5237,9 @@ void deleteBufferStackComponent(Component * rootComponent){
 
 void deleteComponent(Component * component){
   //Clear the print buffer
-  clearPrintBuffer(component);
+  //clearPrintBuffer(component);
+  free(*(component->printBuffer));
+  free(component->printBuffer);
 
   //Free hints
   if (component->actionHint != NULL){
@@ -4976,22 +5261,13 @@ void deleteComponent(Component * component){
 
     case text_t:
       if (component->text_properties.content != NULL){
+        debug("Clearing text component: %s", component->text_properties.content);
         free(component->text_properties.content);
       }
       break;
 
     case treeview_t:
-      //Iterate over every tree view element
-      TreeViewElement * treeElem = component->treeview_properties.child;
-      while (treeElem != NULL){
-        //Free string table
-        clearStringTable(&treeElem->texts);
-        //Free the text component
-        deleteComponent(treeElem->textComponent);
-
-        treeElem = treeElem->nextElement;
-        free(treeElem->prevElement);
-      }
+      clearTreeViewElements(component);
       break;
 
     case settings_t:
@@ -5026,4 +5302,233 @@ void deleteComponent(Component * component){
 
   //Remove the actual component
   free(component);
+}
+
+void clearTreeViewElements(Component * treeView){
+  debug("Clearing tree view elements");
+  //Iterate over every tree view element
+  TreeViewElement * auxElem;
+  TreeViewElement * treeElem = treeView->treeview_properties.child;
+  while (treeElem != NULL){
+    //Free string table
+    clearStringTable(&treeElem->texts);
+    //Free the text component
+    deleteComponent(treeElem->textComponent);
+
+    if (treeElem->data != NULL){
+      free(treeElem->data);
+      treeElem->data = NULL;
+    }
+
+
+    auxElem = treeElem;
+    treeElem = treeElem->nextElement;
+    free(auxElem);
+  }
+
+  treeView->treeview_properties.child = NULL;
+}
+
+/**
+ * @brief Scans all files in a directory
+ *
+ * @param path Path to folder
+ * @param filter Regexp string filtering the files to show
+ * @param includeFolders Scan for folders too
+ * @param count pointer to returned count of elements
+ * @return Returns a list of string with each element. Folders start with _F_
+ * 
+ */
+// ISO C compliant replacement for POSIX strdup
+static char *duplicate_string(const char *src) {
+    if (!src) return NULL;
+    size_t len = strlen(src) + 1;
+    char *dest = malloc(len);
+    if (dest) {
+        memcpy(dest, src, len);
+    }
+    return dest;
+}
+
+// Helper to free all memory allocated for scan results
+void free_scan_results(FileEntry *results, size_t count) {
+    if (!results) return;
+    for (size_t i = 0; i < count; i++) {
+        free(results[i].path);
+        free(results[i].local_path);
+    }
+    free(results);
+}
+
+/**
+ * Scans a directory and returns a dynamically allocated array of matching paths.
+ * Returns NULL on error or if no matches are found.
+ * Caller is responsible for calling free_scan_results() on the returned pointer.
+ */
+FileEntry * scan_directory(const char *folder_path, const char *regex_filter, bool include_dirs, size_t *out_count) {
+  DIR *dir = NULL;
+  struct dirent *entry = NULL;
+  regex_t regex;
+  bool useRegex = false;
+  char real_path[1024];
+
+  sprintf(real_path, "%s", folder_path);
+  size_t folder_path_len = strlen(folder_path);
+  if (folder_path[0] == '~'){
+    const char *home = getenv("HOME");
+    if (!home){
+      home = getenv("USERPROFILE");
+    }
+    if (home){
+      sprintf(real_path, "%s%s", home, folder_path+1);
+    }
+  }
+  if (folder_path[folder_path_len-1] == '.' &&
+      folder_path[folder_path_len-2] == '.') {
+    //Navigate to previous directory
+    //Remove last /whatever/..
+    folder_path_len = strlen(real_path);
+    int slash_counter = 0;
+    size_t correct_size = -1;
+    for (int i = folder_path_len; i>=0; i--){
+      if (slash_counter >= 2){
+        correct_size = i;
+        break;
+      }
+      if(real_path[i] == '/'){
+        slash_counter++;
+      }
+    }
+
+    if (correct_size == -1){
+      real_path[0] = '/';
+      real_path[1] = '\0';
+    }else{
+      real_path[correct_size+1] = '\0';
+    }
+  
+  }
+
+  debug("Scanning directory: %s", real_path);
+
+  if(regex_filter != NULL && regex_filter[0] != '\0'){
+    useRegex = true;
+  }
+  debug("Using regex: %d", useRegex);
+  
+  if (!out_count) return NULL;
+  *out_count = 0;
+
+  if (useRegex && regcomp(&regex, regex_filter, REG_EXTENDED | REG_NOSUB) != 0) {
+      debug("Could not compile regex: %s\n", regex_filter);
+      return NULL;
+  }
+
+  dir = opendir(real_path);
+  if (!dir) {
+      debug("Unable to open directory");
+      if (useRegex) regfree(&regex);
+      return NULL;
+  }
+
+  size_t capacity = 10;
+  FileEntry *results = malloc(capacity * sizeof(FileEntry));
+  if (!results) {
+      closedir(dir);
+      if (useRegex) regfree(&regex);
+      return NULL;
+  }
+
+  while ((entry = readdir(dir)) != NULL) {
+      if (strcmp(entry->d_name, ".") == 0) {
+        continue;
+      }
+
+      char full_path[1024];
+      char local_path[1024];
+      snprintf(local_path, sizeof(full_path), "%s", entry->d_name);
+      if (strcmp(real_path, "/") == 0){
+        snprintf(full_path, sizeof(full_path), "/%s", entry->d_name);
+      }else{
+        snprintf(full_path, sizeof(full_path), "%s/%s", real_path, entry->d_name);
+      }
+      debug("Item found %s", full_path);
+
+      struct stat path_stat;
+      if (stat(full_path, &path_stat) != 0) {
+        continue;
+      }
+
+      bool is_dir = S_ISDIR(path_stat.st_mode);
+      if (is_dir && !include_dirs) {
+        continue;
+      }
+
+      bool isMatch = true;
+      if (useRegex){
+        isMatch = regexec(&regex, entry->d_name, 0, NULL, 0) == 0;
+      }
+      debug("Before is match");
+      if (isMatch){
+        debug("Item matched %s", full_path);
+        // Reallocate memory if dynamic array is full
+        if (*out_count >= capacity) {
+            size_t new_capacity = capacity * 2;
+            FileEntry *temp = realloc(results, new_capacity * sizeof(FileEntry));
+            if (!temp) {
+                // Cleanup existing memory on allocation failure
+                free_scan_results(results, *out_count);
+                *out_count = 0;
+                closedir(dir);
+                if (useRegex) regfree(&regex);
+                return NULL;
+            }
+            results = temp;
+            capacity = new_capacity;
+        }
+
+        // Duplicate the string safely
+        char *local_path_copy = duplicate_string(local_path);
+        char *path_copy = duplicate_string(full_path);
+        if (!path_copy || !local_path_copy) {
+            // Cleanup existing memory if string duplication fails
+            free_scan_results(results, *out_count);
+            *out_count = 0;
+            closedir(dir);
+            if (useRegex) regfree(&regex);
+            return NULL;
+        }
+
+        results[*out_count].path = path_copy;
+        results[*out_count].local_path = local_path_copy;
+        results[*out_count].is_folder = is_dir;
+        (*out_count)++;
+      }
+  }
+
+  closedir(dir);
+  if (useRegex) regfree(&regex);
+
+  // Shrink array to exact fit if elements were found
+  if (*out_count > 0 && *out_count < capacity) {
+      FileEntry *shrunk = realloc(results, (*out_count) * sizeof(FileEntry));
+      if (shrunk) {
+          results = shrunk;
+      }
+  } else if (*out_count == 0) {
+      free(results);
+      results = NULL;
+  }
+
+  return results;
+}
+
+int isFolder(char * path){
+    struct stat path_stat;
+    if (stat(path, &path_stat) != 0) {
+      return false;
+    }
+
+    bool is_dir = S_ISDIR(path_stat.st_mode);
+    return is_dir;
 }
