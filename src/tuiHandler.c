@@ -175,7 +175,12 @@ typedef struct Style {
   char **borderColor;
 } Style;
 
-enum ComponentType { container_t, viewport_t, tabview_t, text_t, treeview_t, settings_t };
+enum ComponentType { container_t = 0,
+                     viewport_t = 1,
+                     tabview_t = 2,
+                     text_t = 3,
+                     treeview_t = 4,
+                     settings_t = 5 };
 typedef struct Component {
   // Basic config
   enum ComponentType component_type;
@@ -254,6 +259,7 @@ typedef struct Component {
   long printBufferSize;
   long writtenBufferSize;
 
+  void * extraData;
 } Component;
 
 typedef struct ComponentTable {
@@ -266,6 +272,10 @@ typedef struct {
   char * path;
   bool is_folder;
 } FileEntry;
+
+typedef struct {
+  int currentState; // 0 idle, 1 url, 2 viewport
+} ImportStlWindowData;
 
 /*Function declaration*/
 void initUI();
@@ -344,6 +354,8 @@ void clearPrintBuffer(Component * printBuffer);
 void printBuffer(Component * component);
 ComponentTable newComponentTable(Component *cmp);
 void addComponentToTable(Component *component, ComponentTable *table);
+void replaceBufferContent(char ** origin, size_t buff_len, char * text);
+void updateString(char **origin, char *text);
 TreeViewElement *getNextTreeViewElement(TreeViewElement *element,
                                         int collapsed);
 TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
@@ -372,6 +384,7 @@ void clearTreeViewElements(Component * treeView);
 void deleteBufferStackComponent(Component * rootComponent);
 void focusBuffer(Component * rootComponent);
 int handleImportSTLInput(Component * rootComponent, char keypress);
+void updateUrlInputFromTreeview(Component * treeView, SettingsElement * urlInput);
 
 /*Color deffinitions*/
 const Color BG_COLOR = (Color){7, 18, 36};
@@ -1278,39 +1291,100 @@ int handleImportSTLInput(Component * rootComponent, char keypress){
   int keyHandled = 1;
   Component * actualFloatingWindow = rootComponent->children[0];
   Component * urlBox = actualFloatingWindow->children[0];
-  Component * treeView = actualFloatingWindow->children[1];
+  Component * urlInput = urlBox->children[1];
+  Component * treeView = actualFloatingWindow->children[1]->children[0];
   Component * viewport = actualFloatingWindow->children[2];
+
+  ImportStlWindowData * extraData = rootComponent->extraData;
   
   // Try to handle with children
 
   //Otherwise handle it here
-  switch(keypress){
-      case 27:
-        //Exit component
-        //focusBuffer(&parentComponent);
-        deleteBufferStackComponent(importSTLWindow);
-        focusComponent = objectManagerComponent;
-        importSTLWindow = NULL;
+  switch(extraData->currentState){
+    case 0:
+      // Treeview Movement
+      switch(keypress){
+        case 27:
+          //Exit component
+          //focusBuffer(&parentComponent);
+          deleteBufferStackComponent(importSTLWindow);
+          focusComponent = objectManagerComponent;
+          importSTLWindow = NULL;
+          break;
+        case 'j':
+        case 'k':
+          keyHandled = defaultTreeViewInputHandler(treeView, keypress);
+          break;
+        case 'l':
+          char * pathToScan = ((char *) (treeView->treeview_properties.selectedElement->data));
+          debug("Path to scan %s", pathToScan);
+          if (isFolder(pathToScan)){
+            scanAndFillDirectoryTreeView(pathToScan, treeView);
+            updateUrlInputFromTreeview(treeView, urlInput->settings_properties.focusElement);
+          }
+          updateComponent(urlInput, 0);
+          break;
+        case 'h':
+          scanAndFillDirectoryTreeView(treeView->treeview_properties.child->data, treeView);
+          updateUrlInputFromTreeview(treeView, urlInput->settings_properties.focusElement);
+
+          updateComponent(urlInput, 0);
+          break;
+        case 'i':
+          extraData->currentState = 1;
+          urlInput->settings_properties.editing = 1;
+          //strcpy("Hello there :D", urlInput->settings_properties.focusElement->line_text_data.textContent);
+          updateComponent(actualFloatingWindow, 0);
+          break;
+        default:
+          keyHandled = 0;
         break;
-      case 'j':
-      case 'k':
-        keyHandled = defaultTreeViewInputHandler(treeView, keypress);
-        break;
-      case 'l':
-        char * pathToScan = ((char *) (treeView->treeview_properties.selectedElement->data));
-        debug("Path to scan %s", pathToScan);
-        if (isFolder(pathToScan)){
-          scanAndFillDirectoryTreeView(pathToScan, treeView);
+      }
+      break;
+    case 1:
+      // Inside URL Input
+      if (keypress == 27 || keypress == '\n'){
+        extraData->currentState = 0;
+        urlInput->settings_properties.editing = 0;
+        char * urlToScan;
+        //urlInput->settings_properties.focusElement->line_text_data.textContent;
+        SettingsElement * focusElement = urlInput->settings_properties.focusElement;
+        if (focusElement != NULL){
+          urlToScan = focusElement->line_text_data.textContent;
+          debug("Url to scan %s", urlToScan);
+
+          if (isFolder(urlToScan)){
+            scanAndFillDirectoryTreeView(urlToScan, treeView);
+            updateUrlInputFromTreeview(treeView, urlInput->settings_properties.focusElement);
+          }
         }
-        break;
-      case 'h':
-        scanAndFillDirectoryTreeView(treeView->treeview_properties.child->data, treeView);
-        break;
-      default:
-        keyHandled = 0;
+      }else{
+        keyHandled = urlInput->onKeyPress(urlInput, keypress);
+      }
+      updateComponent(urlInput, 0);
+      break;
+    case 2:
+      // Inside viewport
+      break;
+    default:
+      keyHandled = 0;
+    break;
   }
 
   return keyHandled;
+}
+
+void updateUrlInputFromTreeview(Component * treeView, SettingsElement * urlInput){
+  int url_len = strlen(treeView->treeview_properties.child->data)-3;
+  urlInput->line_text_data.textContent = calloc(sizeof(char)*(urlInput->line_text_data.maxTextSize+1), sizeof(char));
+  urlInput->line_text_data.textContent[urlInput->line_text_data.maxTextSize] = '\0';
+  strncpy(urlInput->line_text_data.textContent,
+      treeView->treeview_properties.child->data,
+      url_len);
+  urlInput->line_text_data.textContent[strlen(urlInput->line_text_data.textContent)] = '\0';
+  urlInput->line_text_data.cursorPosition = url_len;
+
+  return;
 }
 
 int handleSettingInput(Component *component, char keypress) {
@@ -1543,9 +1617,11 @@ int handleSettingsNumberFieldKeypress(Component * component, char keypress){
 
 
 int handleSettingsLineTextKeypress(Component * component, char keypress){
+  debug("Handling keypress on line text input");
   Settings * cmpSettings = &component->settings_properties;
   LineTextSetting * lineSettings = &cmpSettings->focusElement->line_text_data;
 
+  int line_width = lineSettings->width != -1 ? lineSettings->width : component->real_width;
 
   int keyHandled = 1;
   switch(keypress){
@@ -1566,7 +1642,7 @@ int handleSettingsLineTextKeypress(Component * component, char keypress){
         break;
       }
       lineSettings->cursorPosition++;
-      if (lineSettings->cursorPosition > (lineSettings->offset + lineSettings->width-1)){
+      if (lineSettings->cursorPosition > (lineSettings->offset + line_width -1)){
         lineSettings->offset++;
       }
       break;
@@ -1813,43 +1889,74 @@ void showImportSTLWindow(){
     urlBox->topToTopOf = actualFloatingWindow;
     urlBox->startToStartOf = actualFloatingWindow;
     urlBox->endToEndOf = actualFloatingWindow;
-    urlBox->childCount = 1;
+    urlBox->childCount = 2;
     urlBox->children = malloc(sizeof(Component*)*urlBox->childCount);
 
-    Component * urlTitle = newTextComponent(" URL ", actualFloatingWindow);
+    Component * urlComponent = newSettingsComponent(urlBox);
+    SettingsElement * urlInput = newSettingsLineText("", -1, NULL, NULL);
+    urlInput->line_text_data.width = -1;
+    urlComponent->settings_properties.child = urlInput;
+    //urlComponent->settings_properties.focusElement = urlInput;
+    urlComponent->topToTopOf = urlBox;
+    urlComponent->startToStartOf = urlBox;
+    urlComponent->endToEndOf = urlBox;
+    urlComponent->bottomToBottomOf = urlBox;
+    urlComponent->autoWidth = 2;
+    urlComponent->autoHeight = 0;
+    urlComponent->height = 1;
+    urlComponent->margin = 1;
+    urlComponent->onKeyPress = handleSettingInput;
+
+    Component * urlTitle = newTextComponent(" URL ", urlBox);
     urlTitle->topToTopOf = urlBox;
     urlTitle->startToStartOf = urlBox;
     urlTitle->marginStart = 3;
+    //urlTitle->marginTop = 1;
 
     urlBox->children[0] = urlTitle;
+    urlBox->children[1] = urlComponent;
 
-    Component * treeView = newTreeViewComponent(actualFloatingWindow);
-    treeView->topToBottomOf = urlBox;
-    treeView->startToStartOf = actualFloatingWindow;
-    treeView->bottomToBottomOf = actualFloatingWindow;
-    treeView->endToEndOf = actualFloatingWindow;
+    Component * treeViewBox = newContainerCmp(actualFloatingWindow);
+    treeViewBox->topToBottomOf = urlBox;
+    treeViewBox->startToStartOf = actualFloatingWindow;
+    treeViewBox->bottomToBottomOf = actualFloatingWindow;
+    treeViewBox->endToEndOf = actualFloatingWindow;
+    treeViewBox->autoHeight = 2;
+    //treeViewBox->autoWidth = 2;
+    treeViewBox->autoWidth = 2;
+    treeViewBox->widthBias = 0.5;
+    treeViewBox->xBias = 0;
+    treeViewBox->border = 1;
+    treeViewBox->padding = 1;
+
+    Component * treeView = newTreeViewComponent(treeViewBox);
+    treeView->topToTopOf = treeViewBox;
+    treeView->bottomToBottomOf = treeViewBox;
+    treeView->startToStartOf = treeViewBox;
+    treeView->endToEndOf = treeViewBox;
     treeView->autoHeight = 2;
-    //treeView->autoWidth = 2;
     treeView->autoWidth = 2;
-    treeView->widthBias = 0.5;
-    treeView->xBias = 0;
+
+    treeViewBox->childCount = 1;
+    treeViewBox->children = malloc(sizeof(Component *) * treeViewBox->childCount);
+    treeViewBox->children[0] = treeView;
 
     //Fill tree view
     scanAndFillDirectoryTreeView("~", treeView);
-
+    updateUrlInputFromTreeview(treeView, urlInput);
     Component * viewport = newContainerCmp(actualFloatingWindow);
     viewport->endToEndOf = actualFloatingWindow;
     viewport->topToBottomOf = urlBox;
     viewport->bottomToBottomOf = actualFloatingWindow;
     viewport->endToEndOf = actualFloatingWindow;
-    viewport->startToEndOf = treeView;
+    viewport->startToEndOf = treeViewBox;
     viewport->autoHeight = 2;
     viewport->autoWidth = 2;
 
     actualFloatingWindow->childCount = 3;
     actualFloatingWindow->children = malloc(sizeof(Component * ) * actualFloatingWindow->childCount);
     actualFloatingWindow->children[0] = urlBox;
-    actualFloatingWindow->children[1] = treeView;
+    actualFloatingWindow->children[1] = treeViewBox;
     actualFloatingWindow->children[2] = viewport;
 
 
@@ -1857,6 +1964,8 @@ void showImportSTLWindow(){
     importSTLWindow = floatingWindow;
     updateComponent(floatingWindow, 1);
   }
+  floatingWindow->extraData = malloc(sizeof(ImportStlWindowData));
+  ((ImportStlWindowData *) floatingWindow->extraData)->currentState = 0;
 
   focusBuffer(floatingWindow);
 }
@@ -1907,7 +2016,7 @@ void scanAndFillDirectoryTreeView(char * path, Component * treeView){
     if (showingFolders == 1) showingFolders = 0;
     else break;
   }
-  updateComponent(treeView, 1);
+  updateComponent(treeView->parent, 0);
   free_scan_results(files,files_count);
 }
 
@@ -2549,9 +2658,9 @@ void updateAxis(){
 
 void prepareTerminal() {
   // Swaps buffer
-  //printf("\033[?1049h");
+  printf("\033[?1049h");
   fflush(stdout);
-  //printf("\033[?25l");
+  printf("\033[?25l");
   fflush(stdout);
 
   // Enable raw input mode
@@ -3471,8 +3580,8 @@ void drawSettingsComponent(Component *component, int forceDraw) {
   clearPrintBuffer(component);
   SettingsElement * currentRowElement = component->settings_properties.child;
   int localRow = 0;
-  component->global_y = component->parent->global_y;
-  component->global_x = component->parent->global_x;
+  component->global_y = component->parent->global_y + component->y;
+  component->global_x = component->parent->global_x + component->x;
   int globalY = component->global_y;
   int globalX = component->global_x;
   int width = component->real_width;
@@ -3493,12 +3602,12 @@ void drawSettingsComponent(Component *component, int forceDraw) {
     int text_len = strlen(currentRowElement->title);
     
     //Fill the remaining space with blank spaces
-    char * text = malloc(sizeof(char) * (width));
+    char * text = malloc(sizeof(char) * (width+1));
     memset(text, ' ', width);
     text[width] = '\0';
     sprintf(text, "%s", currentRowElement->title);
     fflush(stdout);
-    text[text_len] = ' ';
+    if(text_len > 0) text[text_len] = ' ';
     if (textComponent == NULL){
       textComponent = newTextComponent(text, component);
     }else{
@@ -3565,7 +3674,10 @@ void drawLineTextSetting(Component * component, SettingsElement * currentRowElem
   //Draw the text content from the offset and add white spaces if there is more space
   int start = strlen(currentRowElement->title)+1+globalX;
   int end = start + currentRowElement->line_text_data.width;
-  if (end > (component->global_x + component->real_width)){
+  if (currentRowElement->line_text_data.width == -1){
+    end = -1;
+  }
+  if (end > (component->global_x + component->real_width) || end == -1){
     end = component->global_x + component->real_width;
   }
   int realInputWidth = end - start;
@@ -3573,6 +3685,9 @@ void drawLineTextSetting(Component * component, SettingsElement * currentRowElem
   char * printBuffer = malloc(sizeof(char) * realInputWidth+1);
   char * textContent = currentRowElement->line_text_data.textContent;
   int offset = currentRowElement->line_text_data.offset;
+  if (strlen(textContent) < currentRowElement->line_text_data.cursorPosition){
+    //currentRowElement->line_text_data.cursorPosition = strlen(textContent);
+  }
 
   int textSizeToPrint = strlen(textContent) - offset;
   if (textSizeToPrint < 0) textSizeToPrint = 0;
@@ -4226,7 +4341,7 @@ void calculateComponentDimensions(Component *component, Component *parent) {
 void calculateComponentDimensionsHeight(Component *component,
                                         Component *parent) {
 
-  debug("Calculando componente con id %d", parent);
+  debug("Calculating component height of type %d id %d", component->component_type, component);
   // Skips this one if it's position depends on his parent height and it's not
   // yet been calculated
   if (parent->real_height == 0 && (component->topToBottomOf == parent ||
@@ -4420,7 +4535,7 @@ void calculateComponentDimensionsWidth(Component *component,
                                        Component *parent) {
 
 
-  debug("Calculando componente con id %d", parent);
+  debug("Calculating component width of type %d id %d", component->component_type, parent);
   // Skips this one if it's position depends on his parent height and it's not
   // yet been calculated
   if (parent->real_width == 0 &&
@@ -4690,6 +4805,7 @@ Component *newContainer(Component * parent) {
   cont->printBufferSize = 1024;
   cont->writtenBufferSize = 0;
   cont->parent = parent;
+  cont->extraData = NULL;
 
   return cont;
 }
@@ -4853,6 +4969,8 @@ Component * newSettingsComponent(Component * parent) {
 }
 SettingsElement * newSettingsElement(char * title, SettingsElement * prevElement, SettingsElement * nextElement){
   SettingsElement * element = malloc(sizeof(SettingsElement));
+  element->nextElement = NULL;
+  element->previousElement = NULL;
   if (prevElement != NULL){
     element->previousElement = prevElement;
     element->previousElement->nextElement = element;
@@ -4862,6 +4980,7 @@ SettingsElement * newSettingsElement(char * title, SettingsElement * prevElement
     element->nextElement->previousElement = element;
   }
   element->title = title;
+  element->textComponent = NULL;
   return element;
 }
 
@@ -4888,7 +5007,8 @@ SettingsElement * newSettingsLineText(char * title, int textSize, SettingsElemen
   SettingsElement * element = newSettingsElement(title, prevElement, nextElement);
   element->fieldType = line_text_s;
   element->line_text_data.maxTextSize = textSize > 0 ? textSize : 100;
-  element->line_text_data.textContent = malloc(sizeof(char)*element->line_text_data.maxTextSize+1);
+  element->line_text_data.textContent = calloc(sizeof(char)*(element->line_text_data.maxTextSize+1), sizeof(char));
+  element->line_text_data.textContent[element->line_text_data.maxTextSize] = '\0';
   element->line_text_data.cursorPosition = 0;
   element->line_text_data.offset = 0;
   element->line_text_data.width = 12;
@@ -5067,6 +5187,11 @@ void updateString(char **origin, char *text) {
   strcpy(*origin, text);
 }
 
+void replaceBufferContent(char ** origin, size_t buff_len, char * text){
+  memset(*origin, ' ', buff_len);
+  snprintf(*origin, buff_len, "%s", text);
+}
+
 /*Function that adds a new component to a table of components*/
 void addComponentToTable(Component *component, ComponentTable *table) {
   debug("Adding element to component table of size %d. cmp: %d", table->length,
@@ -5240,6 +5365,9 @@ void deleteComponent(Component * component){
   //clearPrintBuffer(component);
   free(*(component->printBuffer));
   free(component->printBuffer);
+  if (component->extraData != NULL){
+    free(component->extraData);
+  }
 
   //Free hints
   if (component->actionHint != NULL){
@@ -5273,6 +5401,9 @@ void deleteComponent(Component * component){
     case settings_t:
       SettingsElement * settingElement = component->settings_properties.child;
       while (settingElement != NULL){
+        if (settingElement->previousElement!=NULL){
+          free(settingElement->previousElement);
+        }
         //Free text component
         if (settingElement->textComponent != NULL){
           deleteComponent(settingElement->textComponent);
@@ -5290,8 +5421,14 @@ void deleteComponent(Component * component){
           default:
             break;
         }
-        settingElement = settingElement->nextElement;
-        free(settingElement->previousElement);
+
+        if (settingElement->nextElement != NULL){
+          settingElement = settingElement->nextElement;
+          free(settingElement->previousElement);
+        }else{
+          free(settingElement);
+          break;
+        }
       }
   }
 
