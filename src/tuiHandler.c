@@ -1,3 +1,6 @@
+#define _XOPEN_SOURCE 700 // Exposes POSIX.1-2008 functions including wcswidth
+#define _POSIX_C_SOURCE 199309L
+#include <time.h>
 #include <asm-generic/errno-base.h>
 #include <asm-generic/errno.h>
 #include <asm-generic/ioctls.h>
@@ -18,6 +21,8 @@
 #include <regex.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <wchar.h>
+#include <locale.h>
 #include "../include/cglm/cglm.h"
 
 #include "../include/renderer.h"
@@ -366,6 +371,9 @@ void createAxis();
 FileEntry * scan_directory(const char *folder_path, const char *regex_filter, bool include_dirs, size_t *out_count);
 void free_scan_results(FileEntry *results, size_t count);
 int isFolder(char * path);
+int getStringColumnWidth(char * string);
+size_t getStringColumnIndex(char * str, int target_col);
+void sleep_us(long microseconds);
 Component * createFloatingWindow();
 void showImportSTLWindow();
 void scanAndFillDirectoryTreeView(char * path, Component * treeView);
@@ -2061,6 +2069,7 @@ Component * createFloatingWindow(){
 
 /*Here starts the Library related functions*/
 int main() {
+  setlocale(LC_ALL, "");
   setbuf(stdout, NULL);
   DEBUG = 1;
   initUI();
@@ -2085,7 +2094,7 @@ int main() {
     // viewport.render_settings->active_camera = myCam;
 
     drawUI();
-    usleep(5000);
+    sleep_us(5*1000);
     // getchar();
     // int aux = 0/0;
     // vp_render_viewport(&viewport);
@@ -3203,15 +3212,45 @@ void drawTextComponent(Component *component, int forceDraw) {
     char *currentColor = malloc(sizeof(char) * strlen(stringToPrint));
     int calculatedHeight = 1;
     int wordOffset = 0;
+    int wordOffsetByte = 0;
     int lineOffset = 0;
+    int lineOffsetByte = 0;
     int firstWord = 1;
     int maxWidth = 0;
     int readingColor = 0;
     int printingColor = 0;
+    size_t symbol_bytes = 1;
+    unsigned char c;
+    char completeChar[5];
+    int gathering_char_byte = 0;
+
     // Calculate string height
     for (int i = 0; i < strlen(stringToPrint) + 1; i++) {
+      c = stringToPrint[i];
+      if (gathering_char_byte == 0){
+        // Check if byte starts a multi-byte sequence
+        if ((c & 0x80) == 0x00) {      // 0xxxxxxx: 1-byte ASCII
+            symbol_bytes = 1;
+        } else if ((c & 0xE0) == 0xC0) { // 110xxxxx: 2-byte sequence
+            symbol_bytes = 2;
+        } else if ((c & 0xF0) == 0xE0) { // 1110xxxx: 3-byte sequence
+            symbol_bytes = 3;
+        } else if ((c & 0xF8) == 0xF0) { // 11110xxx: 4-byte sequence
+            symbol_bytes = 4;
+        }
+        debug("Symbol bytes: %d", symbol_bytes);
+        gathering_char_byte = symbol_bytes;
+      }
+
+      if (gathering_char_byte > 0){
+        completeChar[symbol_bytes-gathering_char_byte] = c;
+        gathering_char_byte--;
+        if (gathering_char_byte > 0) continue;
+      }
+      completeChar[symbol_bytes-gathering_char_byte] = '\0';
+
       // For every letter, store each word, and if it fits in width, print it
-      debug("Char to print: %c", stringToPrint[i]);
+      debug("Char to print: %s", completeChar);
       debug("..WordOffset %d", wordOffset);
       debug("..LineOffset %d", lineOffset);
 
@@ -3229,10 +3268,11 @@ void drawTextComponent(Component *component, int forceDraw) {
         }
         continue;
       }
+
       if (stringToPrint[i] == ' ' || stringToPrint[i] == '\n' ||
           stringToPrint[i] == '\r' || stringToPrint[i] == '\t' ||
           stringToPrint[i] == '\0') {
-        wordToPrint[wordOffset] = '\0';
+        wordToPrint[wordOffsetByte] = '\0';
         // If word can be stored inside the remaining string, store it
         if ((stringToPrint[i] != '\0' &&
              wordOffset + 1 <= (component->real_width - lineOffset)) ||
@@ -3245,10 +3285,12 @@ void drawTextComponent(Component *component, int forceDraw) {
           if (!firstWord)
             strcat(finalString, " ");
           firstWord = 0;
-          strncat(finalString, wordToPrint, wordOffset);
+          strncat(finalString, wordToPrint, wordOffsetByte);
           strcpy(wordToPrint, "");
           lineOffset += wordOffset + 1;
+          lineOffsetByte += wordOffsetByte +1;
           wordOffset = 0;
+          wordOffsetByte = 0;
 
           if (stringToPrint[i] == '\0') {
             strcat(finalString, "\0");
@@ -3283,7 +3325,9 @@ void drawTextComponent(Component *component, int forceDraw) {
             }
             strncat(finalString, wordToPrint, wordOffset);
             lineOffset = wordOffset + 1;
+            lineOffsetByte = wordOffsetByte +1;
             wordOffset = 0;
+            wordOffsetByte = 0;
             strcpy(wordToPrint, "");
           }
         }
@@ -3293,19 +3337,28 @@ void drawTextComponent(Component *component, int forceDraw) {
           calculatedHeight++;
           if (lineOffset > maxWidth) maxWidth = lineOffset;
           wordOffset = 0;
+          wordOffsetByte = 0;
           lineOffset = 0;
+          lineOffsetByte = 0;
           firstWord = 1;
         } else if (stringToPrint[i] == '\t') {
           strncat(finalString, stringToPrint + i, 1);
           // IDK what to do, treat it as 8 spaces
           lineOffset += 8;
+          lineOffsetByte += 8;
           wordOffset = 0;
+          wordOffsetByte = 0;
         }
 
       } else {
         // wordToPrint[wordOffset] = stringToPrint[i];
-        wordToPrint[wordOffset] = stringToPrint[i];
+        for (int j = 0; j<symbol_bytes; j++){
+          wordToPrint[wordOffsetByte+j] = completeChar[j];
+        }
+        wordToPrint[wordOffsetByte+symbol_bytes] = '\0';
+        debug("Inserting char \'%s\' in word to print: \"%s\"", completeChar, wordToPrint); 
         wordOffset++;
+        wordOffsetByte+=symbol_bytes;
         // lineOffset++;
       }
       // If word too long, split it with '-'
@@ -3438,18 +3491,26 @@ void drawTreeView(Component *component, int forceDraw) {
         // Text content
         if (textElement->text_properties.content == NULL)
           free(textElement->text_properties.content);
-        int textSize = strlen(current->texts.table[0]) +
+        int textSizeColumns = getStringColumnWidth(current->texts.table[0]) +
+                       getStringColumnWidth(current->texts.table[1]) +
+                       getStringColumnWidth(current->texts.table[2]) + 3;
+        int textSizeBytes = strlen(current->texts.table[0]) +
                        strlen(current->texts.table[1]) +
-                       strlen(current->texts.table[2]) + 10;
-        if (textSize < (component->real_width - hierarchyLevel * 3))
-          textSize = component->real_width + 1 - hierarchyLevel * 3;
+                       strlen(current->texts.table[2]) +10;
+        if (textSizeColumns != (component->real_width - hierarchyLevel * 3)){
+          int diff = component->real_width + 1 - hierarchyLevel * 3 - textSizeColumns;
+          textSizeColumns += diff;
+          textSizeBytes += diff;
+        }
+
         if (textElement->text_properties.content != NULL){
           free(textElement->text_properties.content);
         }
         textElement->text_properties.content =
-            malloc(sizeof(char) * (textSize));
-        memset(textElement->text_properties.content, ' ', textSize - 1);
+            malloc(sizeof(char) * (textSizeBytes));
+        memset(textElement->text_properties.content, ' ', textSizeBytes - 1);
         int finalLength = 0;
+        int finalLengthColumns = 0;
         if (current->childElement != NULL) {
           finalLength = strlen(current->texts.table[current->collapsed]) +
                         strlen(current->texts.table[2]) + 4;
@@ -3461,10 +3522,12 @@ void drawTreeView(Component *component, int forceDraw) {
           sprintf(textElement->text_properties.content, "%s",
                   current->texts.table[2]);
         }
-
-        if (textSize == component->real_width + 1 - hierarchyLevel * 3) {
+        
+        if (textSizeColumns == component->real_width + 1 - hierarchyLevel * 3) {
           textElement->text_properties.content[finalLength - 1] = ' ';
-          textElement->text_properties.content[textSize - 1] = '\0';
+          textElement->text_properties.content[textSizeBytes-1] = '\0';
+          int finalStringChar = getStringColumnIndex(textElement->text_properties.content, textSizeColumns-1);
+          textElement->text_properties.content[finalStringChar] = '\0';
         }
 
         // Text color
@@ -4236,63 +4299,80 @@ void calculateTextComponent(Component *component) {
     int calculatedHeight = 1;
     int wordOffset = 0;
     int lineOffset = 0;
+    
+    size_t symbol_bytes = 1;
+    unsigned char c;
+
     // Calculate string height
     for (int i = 0; i < strlen(stringToPrint) + 1; i++) {
-      {
-        // For every letter, store each word, and if it fits in width, print it
-        debug("Char to print: %c", stringToPrint[i]);
-        // debug("..WordOffset %d", wordOffset);
-        // debug("..LineOffset %d", lineOffset);
-        if (stringToPrint[i] == ' ' || stringToPrint[i] == '\n' ||
-            stringToPrint[i] == '\r' || stringToPrint[i] == '\t' ||
-            stringToPrint[i] == '\0') {
-          // If word can be stored inside the remaining string, store it
-          if ((stringToPrint[i] != '\0' &&
-               wordOffset + 1 <= (component->real_width - lineOffset)) ||
-              (stringToPrint[i] == '\0' &&
-               wordOffset <= (component->real_width - lineOffset))) {
-            // wordToPrint[wordOffset] = '\0';
-            // No need for adding new line
-            if (stringToPrint[i] != '\0') {
-              lineOffset += wordOffset + 1;
-              wordOffset = 0;
-            } else {
-              lineOffset += wordOffset;
-              wordOffset = 0;
-            }
-            longestSentence =
-                longestSentence < lineOffset ? lineOffset : longestSentence;
-            // store it in new line otherwise
-          } else {
-            // Add new line and store word
-            longestSentence =
-                longestSentence < lineOffset ? lineOffset : longestSentence;
-            lineOffset = wordOffset + 1;
-            wordOffset = 0;
-            calculatedHeight++;
-          }
-
-          if (stringToPrint[i] == '\n' || stringToPrint[i] == '\r') {
-            debug("Lane junp");
-            longestSentence =
-                longestSentence < lineOffset ? lineOffset : longestSentence;
-            calculatedHeight++;
-            wordOffset = 0;
-            lineOffset = 0;
-          } else if (stringToPrint[i] == '\t') {
-            // IDK what to do, treat it as 8 spaces
-            lineOffset += 8;
-            wordOffset = 0;
-          }
-          // If word can't be stored in a single line
-          // Split word in '-'? Just leave it there?
-        } else {
-          // wordToPrint[wordOffset] = stringToPrint[i];
-          wordOffset++;
-          // lineOffset++;
-        }
-        // If word too long, split it with '-'
+      if (symbol_bytes > 1){
+        symbol_bytes--;
+        continue;
       }
+      c = stringToPrint[i];
+      // Check if byte starts a multi-byte sequence
+      if ((c & 0x80) == 0x00) {      // 0xxxxxxx: 1-byte ASCII
+          symbol_bytes = 1;
+      } else if ((c & 0xE0) == 0xC0) { // 110xxxxx: 2-byte sequence
+          symbol_bytes = 2;
+      } else if ((c & 0xF0) == 0xE0) { // 1110xxxx: 3-byte sequence
+          symbol_bytes = 3;
+      } else if ((c & 0xF8) == 0xF0) { // 11110xxx: 4-byte sequence
+          symbol_bytes = 4;
+      }
+      // For every letter, store each word, and if it fits in width, print it
+      debug("Char to print: %c", stringToPrint[i]);
+      // debug("..WordOffset %d", wordOffset);
+      // debug("..LineOffset %d", lineOffset);
+      if (stringToPrint[i] == ' ' || stringToPrint[i] == '\n' ||
+          stringToPrint[i] == '\r' || stringToPrint[i] == '\t' ||
+          stringToPrint[i] == '\0') {
+        // If word can be stored inside the remaining string, store it
+        if ((stringToPrint[i] != '\0' &&
+             wordOffset + 1 <= (component->real_width - lineOffset)) ||
+            (stringToPrint[i] == '\0' &&
+             wordOffset <= (component->real_width - lineOffset))) {
+          // wordToPrint[wordOffset] = '\0';
+          // No need for adding new line
+          if (stringToPrint[i] != '\0') {
+            lineOffset += wordOffset + 1;
+            wordOffset = 0;
+          } else {
+            lineOffset += wordOffset;
+            wordOffset = 0;
+          }
+          longestSentence =
+              longestSentence < lineOffset ? lineOffset : longestSentence;
+          // store it in new line otherwise
+        } else {
+          // Add new line and store word
+          longestSentence =
+              longestSentence < lineOffset ? lineOffset : longestSentence;
+          lineOffset = wordOffset + 1;
+          wordOffset = 0;
+          calculatedHeight++;
+        }
+
+        if (stringToPrint[i] == '\n' || stringToPrint[i] == '\r') {
+          debug("Lane junp");
+          longestSentence =
+              longestSentence < lineOffset ? lineOffset : longestSentence;
+          calculatedHeight++;
+          wordOffset = 0;
+          lineOffset = 0;
+        } else if (stringToPrint[i] == '\t') {
+          // IDK what to do, treat it as 8 spaces
+          lineOffset += 8;
+          wordOffset = 0;
+        }
+        // If word can't be stored in a single line
+        // Split word in '-'? Just leave it there?
+      } else {
+        // wordToPrint[wordOffset] = stringToPrint[i];
+        wordOffset++;
+        // lineOffset++;
+      }
+      // If word too long, split it with '-'
     }
 
     component->real_height = calculatedHeight;
@@ -4301,7 +4381,7 @@ void calculateTextComponent(Component *component) {
     debug("Calculated Width: %d", longestSentence);
   } else {
     component->real_height = 1;
-    component->real_width = strlen(component->text_properties.content)-1;
+    component->real_width = getStringColumnWidth(component->text_properties.content);
     debug("Calculated Height: %d", component->real_height);
     debug("Calculated Width: %d", component->real_width);
 
@@ -5262,7 +5342,7 @@ void printBuffer(Component * component){
     if (written == 0){
       if (ferror(stdout)){
         clearerr(stdout);
-        usleep(100);
+        sleep_us(100);
         continue;
       }
       break;
@@ -5668,4 +5748,67 @@ int isFolder(char * path){
 
     bool is_dir = S_ISDIR(path_stat.st_mode);
     return is_dir;
+}
+
+int getStringColumnWidth(char * string){
+  wchar_t * wstr = malloc(sizeof(wchar_t)*strlen(string));
+  mbstowcs(wstr, string, strlen(string));
+
+  // Get true visual column width
+  int columns = wcswidth(wstr, strlen(string));
+  free(wstr);
+
+  debug("Width %d for string \"%s\"", columns, string); 
+  return columns;
+}
+
+size_t getStringColumnIndex(char * str, int target_col){
+    if (str == NULL || target_col <= 0) {
+        return 0;
+    }
+
+    // Enable locale for proper UTF-8 multi-byte decoding
+    setlocale(LC_ALL, "");
+
+    mbstate_t state;
+    memset(&state, 0, sizeof(state));
+
+    const char *ptr = str;
+    size_t bytes_left = strlen(str);
+    int current_col = 0;
+    wchar_t wc;
+
+    while (bytes_left > 0) {
+        size_t bytes_consumed = mbrtowc(&wc, ptr, bytes_left, &state);
+
+        // Break on invalid UTF-8 sequences or null terminator
+        if (bytes_consumed == (size_t)-1 || bytes_consumed == (size_t)-2 || bytes_consumed == 0) {
+            break;
+        }
+
+        // Get visual column width (0 for control chars, 1 for normal, 2 for wide/emoji)
+        int char_width = wcwidth(wc);
+        if (char_width < 0) {
+            char_width = 0;
+        }
+
+        // Check if advancing this character reaches or passes our target column
+        if (current_col + char_width > target_col) {
+            return (size_t)(ptr - str);
+        }
+
+        current_col += char_width;
+        ptr += bytes_consumed;
+        bytes_left -= bytes_consumed;
+    }
+
+    // Target column is beyond the end of the string; return the index of the null-terminator
+    return (size_t)(ptr - str);
+}
+
+void sleep_us(long microseconds) {
+    struct timespec ts;
+    ts.tv_sec = microseconds / 1000000;
+    ts.tv_nsec = (microseconds % 1000000) * 1000;
+    nanosleep(&ts, NULL);
 }
