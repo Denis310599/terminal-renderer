@@ -280,6 +280,7 @@ typedef struct {
 
 typedef struct {
   int currentState; // 0 idle, 1 url, 2 viewport
+  char * lastUri;
 } ImportStlWindowData;
 
 /*Function declaration*/
@@ -367,7 +368,7 @@ TreeViewElement *getPrevTreeViewElement(TreeViewElement *element,
                                         int careAboutCollapsed);
 void loadNewObject(char * uri, int format);
 void rotateObject(Object * object, vec3 axis, float angle);
-void createAxis();
+void createAxis(Viewport * viewport);
 FileEntry * scan_directory(const char *folder_path, const char *regex_filter, bool include_dirs, size_t *out_count);
 void free_scan_results(FileEntry *results, size_t count);
 int isFolder(char * path);
@@ -407,6 +408,9 @@ const Color FONT_2_COLOR = (Color){130, 130, 130};
 const Color FONT_3_COLOR = (Color){99, 99, 99};
 const Color FONT_COLOR_HIGHLIGHT = (Color){200, 200, 200};
 const Color BG_VP_COLOR = (Color){60, 60, 60};
+const Color BORDER_COLOR = FONT_2_COLOR;
+const Color BORDER_SELECTED = FONT_COLOR_HIGHLIGHT;
+const Color BORDER_DARK = FONT_3_COLOR;
 
 /*Variable deffinitions*/
 Component parentComponent;
@@ -1176,7 +1180,7 @@ void handleInputNoFocus(char keypress){
 int handleViewportInput(Component * component, char keypress){
   int inputHandled = 1;
   //Vector3d cameraPosition = ACTIVE_CAMERA.pos;
-  Camera myCam = viewport->viewport_properties.vp_settings->render_settings->active_camera;
+  Camera myCam = component->viewport_properties.vp_settings->render_settings->active_camera;
   switch (keypress){
     case 27:
       focusComponent = NULL;
@@ -1192,7 +1196,7 @@ int handleViewportInput(Component * component, char keypress){
     case 'i':
     case 'o':
       //Movement
-      float scaler = viewport->viewport_properties.movementScaler;
+      float scaler = component->viewport_properties.movementScaler;
       Vector3d movVector;
 
       //Get the movement vector and scaler
@@ -1222,25 +1226,25 @@ int handleViewportInput(Component * component, char keypress){
       }
       //Transpose the camera position to the new location
       myCam.pos = vect_sum(myCam.pos, movVector, scaler);
-      viewport->viewport_properties.vp_settings->render_settings->active_camera.pos = myCam.pos;
+      component->viewport_properties.vp_settings->render_settings->active_camera.pos = myCam.pos;
 
       //Calculate the new rotation point
-      viewport->viewport_properties.rotationPoint = getPixelDepthCoordinates(
-          (int)(viewport->viewport_properties.vp_settings->screen_width/2),
-          (int)(viewport->viewport_properties.vp_settings->screen_height/2),
-          viewport->viewport_properties.vp_settings);
-      updateComponent(viewport, 0);
+      component->viewport_properties.rotationPoint = getPixelDepthCoordinates(
+          (int)(component->viewport_properties.vp_settings->screen_width/2),
+          (int)(component->viewport_properties.vp_settings->screen_height/2),
+          component->viewport_properties.vp_settings);
+      updateComponent(component, 0);
       break;
 
     case '+':
-      viewport->viewport_properties.movementScaler *= 10;
+      component->viewport_properties.movementScaler *= 10;
       calculateCommandHintViewport();
-      updateComponent(viewport, 0);
+      updateComponent(component, 0);
       break;
     case '-':
-      viewport->viewport_properties.movementScaler /= 10;
+      component->viewport_properties.movementScaler /= 10;
       calculateCommandHintViewport();
-      updateComponent(viewport, 0);
+      updateComponent(component, 0);
       break;
 
     case 'W':
@@ -1251,7 +1255,7 @@ int handleViewportInput(Component * component, char keypress){
       //Rotate around the rotation point and camera up vector
       Vector3d rotationVector;
       debug("Old camera coords: %.2f, %.2f, %.2f", myCam.pos.x, myCam.pos.y, myCam.pos.z);
-      float rotationAngle = viewport->viewport_properties.movementScaler * 10;
+      float rotationAngle = component->viewport_properties.movementScaler * 10;
       switch(keypress){
         case 'W': 
           rotationVector = myCam.side;
@@ -1268,7 +1272,7 @@ int handleViewportInput(Component * component, char keypress){
           rotationAngle *= -1;
           break;
       }
-      Vector3d rotationPoint = viewport->viewport_properties.rotationPoint;
+      Vector3d rotationPoint = component->viewport_properties.rotationPoint;
       Quaternion rotationQuat = newQuat(rotationVector, deg2rad(rotationAngle));
 
       //Calculate the new coordinates
@@ -1283,9 +1287,9 @@ int handleViewportInput(Component * component, char keypress){
       myCam.dir = vect_rot(myCam.dir, rotationQuat);
 
       //Update the camera
-      viewport->viewport_properties.vp_settings->render_settings->active_camera = myCam;
+      component->viewport_properties.vp_settings->render_settings->active_camera = myCam;
       debug("New camera coords: %.2f, %.2f, %.2f", myCam.pos.x, myCam.pos.y, myCam.pos.z);
-      updateComponent(viewport, 0);
+      updateComponent(component, 0);
       break;
     default:
       inputHandled = 0;
@@ -1302,10 +1306,13 @@ int handleImportSTLInput(Component * rootComponent, char keypress){
   Component * urlInput = urlBox->children[1];
   Component * treeView = actualFloatingWindow->children[1]->children[0];
   Component * viewport = actualFloatingWindow->children[2];
+  Component * viewportRenderer = viewport->children[0];
+  Component * commandHint = actualFloatingWindow->children[3]->children[0];
 
   ImportStlWindowData * extraData = rootComponent->extraData;
   
   // Try to handle with children
+  int old_state = extraData->currentState;
 
   //Otherwise handle it here
   switch(extraData->currentState){
@@ -1318,6 +1325,7 @@ int handleImportSTLInput(Component * rootComponent, char keypress){
           deleteBufferStackComponent(importSTLWindow);
           focusComponent = objectManagerComponent;
           importSTLWindow = NULL;
+          return 1;
           break;
         case 'j':
         case 'k':
@@ -1329,20 +1337,192 @@ int handleImportSTLInput(Component * rootComponent, char keypress){
           if (isFolder(pathToScan)){
             scanAndFillDirectoryTreeView(pathToScan, treeView);
             updateUrlInputFromTreeview(treeView, urlInput->settings_properties.focusElement);
+          }else{
+            //It's not a folder, try to import the stl containing it
+
+            Object * obj = importStl(
+                pathToScan,
+                (Vector3d){1, 1, 1},
+                (Vector3d){0, 0, 0},
+                viewportRenderer->viewport_properties.vp_settings);
+
+            if (obj == NULL) break;
+            ObjectListNode * curretObjectNode = viewportRenderer->viewport_properties.vp_settings->scene_objects;
+
+            Object prevObject = curretObjectNode->next->object;
+            if (prevObject.tipo == Malla){
+              free(prevObject.p_malla);
+            }
+            free(curretObjectNode->next);
+            curretObjectNode->next = NULL;
+
+            obj->visible = 1;
+            
+            // Get the bounding box:
+            Vector3d max_b = {0, 0, 0};
+            Vector3d min_b = {0, 0, 0};
+            Polygon * pol = NULL;
+            for (int pol_index = 0; pol_index<obj->p_malla->n_polygon; pol_index++){
+              if(pol == NULL){
+                pol = &obj->p_malla->polygons[pol_index];
+                max_b = (Vector3d){pol->p1.x, pol->p1.y, pol->p1.z};
+                min_b = (Vector3d){pol->p1.x, pol->p1.y, pol->p1.z};
+              }
+              pol = &obj->p_malla->polygons[pol_index];
+              // X
+              Vector3d points[] = {pol->p1, pol->p2, pol->p3};
+              for(int i = 0; i<3; i++){
+                if (pol->p1.x > max_b.x){
+                  max_b.x = pol->p1.x;
+                }
+                if (pol->p1.x < min_b.x){
+                  min_b.x = pol->p1.x;
+                }
+                // Y
+                if (pol->p1.y > max_b.y){
+                  max_b.y = pol->p1.y;
+                }
+                if (pol->p1.y < min_b.y){
+                  min_b.y = pol->p1.y;
+                }
+                // Z
+                if (pol->p1.z > max_b.z){
+                  max_b.z = pol->p1.z;
+                }
+                if (pol->p1.z < min_b.z){
+                  min_b.z = pol->p1.z;
+                }
+              }
+            }
+
+            debug("Bounding box of object: \nMax(%f, %f, %f), \nMin(%f, %f, %f)",
+                max_b.x,
+                max_b.y,
+                max_b.z,
+                min_b.x,
+                min_b.y,
+                min_b.z);
+
+            debug("Object center: %f, %f, %f",
+                (max_b.x + min_b.x) /2,
+                (max_b.y + min_b.y) /2,
+                (max_b.z + min_b.z) /2
+                );
+
+            obj->pos.x = -(max_b.x + min_b.x) /2;
+            obj->pos.y = -(max_b.y + min_b.y) /2;
+            obj->pos.z = -(max_b.z + min_b.z) /2;
+
+            //Calculate the camera position
+
+            // Get the scale factor for different points
+            Camera cam = viewportRenderer->viewport_properties.vp_settings->render_settings->active_camera;
+            cam.pos = (Vector3d){50, 50, 50};
+            cam.dir = (Vector3d){0, 0, 0};
+            cam.fov = 45;
+            cam.dir = normalizeVector(vect_sum((Vector3d){0, 0, 0}, cam.pos, -1));
+            cam.side = normalizeVector(vectProd(cam.dir, (Vector3d){0, 0, 1}));
+            cam.up = normalizeVector(vectProd(cam.dir, cam.side));
+
+            Vector3d vToCheck[] = {
+              (Vector3d){min_b.x + obj->pos.x,
+                        min_b.y + obj->pos.y,
+                        max_b.z + obj->pos.z},
+              (Vector3d){max_b.x + obj->pos.x,
+                        max_b.y + obj->pos.y,
+                        min_b.z + obj->pos.z},
+              (Vector3d){max_b.x + obj->pos.x,
+                        min_b.y + obj->pos.y,
+                        max_b.z + obj->pos.z},
+              (Vector3d){min_b.x + obj->pos.x,
+                        max_b.y + obj->pos.y,
+                        max_b.z + obj->pos.z}
+            };
+
+            Vector3d rotAxis[] = {
+              cam.side,
+              (Vector3d) {-cam.side.x, -cam.side.y, -cam.side.z},
+              cam.up,
+              (Vector3d) {-cam.up.x, -cam.up.y, -cam.up.z}
+            };
+
+            int scrWidth = viewportRenderer->viewport_properties.vp_settings->screen_width;
+            int scrHeight = viewportRenderer->viewport_properties.vp_settings->screen_height;
+            int minScreenDims = (scrWidth < scrHeight) ? scrWidth : scrHeight;
+            float alphaToCheck[] = {
+              (float) cam.fov/2 * scrHeight/minScreenDims,
+              (float) cam.fov/2 * scrHeight/minScreenDims,
+              (float) cam.fov/2 * scrWidth/minScreenDims,
+              (float) cam.fov/2 * scrWidth/minScreenDims,
+            };
+
+            float distance = 0;
+            Vector3d c = {0, 0, 0};
+            Vector3d pc = normalizeVector(vect_sum(c, cam.pos, -1));
+            for (int point_index = 0; point_index < 4; point_index++){
+              debug("=== Iter %d ===", point_index);
+              float aux_distance = 0;
+              //Rotate c over cam axis
+              Vector3d pc_rot = vect_rot(pc, newQuat(rotAxis[point_index], deg2rad(alphaToCheck[point_index]))) ;
+              Vector3d norm = vectProd(pc_rot, rotAxis[point_index]);
+
+              double d;
+              int error = planeLineIntersectionDistance(
+                  cam.pos, 
+                  norm, 
+                  pc,
+                  vToCheck[point_index],
+                  &d);
+              if (error != 0)
+                continue;
+
+              aux_distance = d;
+
+              if (point_index == 0){
+                distance = aux_distance;
+                continue;
+              }
+              distance = aux_distance > distance ? aux_distance : distance;
+            }
+            
+            Vector3d tVect = vect_sum(
+              (Vector3d) {0, 0, 0},
+              pc,
+              -distance
+            );
+            Vector3d tVect2 = vect_sum(
+              (Vector3d) {0, 0, 0},
+              pc,
+              -moduloVector(vect_sum(c, cam.pos, -1))*0.2
+            );
+            debug("Object final distance: %f", distance);
+            debug("Move vector: %f, %f, %f", tVect.x, tVect.y, tVect.z);
+            //Translate cam
+            cam.pos = vect_translation(
+                cam.pos,
+                tVect,
+                0
+            );
+            cam.pos = vect_translation(
+                cam.pos,
+                tVect2,
+                0
+            );
+            viewportRenderer->viewport_properties.vp_settings->render_settings->active_camera = cam;
+
+            extraData->currentState = 2;
           }
-          updateComponent(urlInput, 0);
           break;
         case 'h':
           scanAndFillDirectoryTreeView(treeView->treeview_properties.child->data, treeView);
           updateUrlInputFromTreeview(treeView, urlInput->settings_properties.focusElement);
 
-          updateComponent(urlInput, 0);
           break;
         case 'i':
           extraData->currentState = 1;
+          insertString(urlInput->settings_properties.child->line_text_data.textContent, &extraData->lastUri);
           urlInput->settings_properties.editing = 1;
           //strcpy("Hello there :D", urlInput->settings_properties.focusElement->line_text_data.textContent);
-          updateComponent(actualFloatingWindow, 0);
           break;
         default:
           keyHandled = 0;
@@ -1354,30 +1534,87 @@ int handleImportSTLInput(Component * rootComponent, char keypress){
       if (keypress == 27 || keypress == '\n'){
         extraData->currentState = 0;
         urlInput->settings_properties.editing = 0;
-        char * urlToScan;
-        //urlInput->settings_properties.focusElement->line_text_data.textContent;
-        SettingsElement * focusElement = urlInput->settings_properties.focusElement;
-        if (focusElement != NULL){
-          urlToScan = focusElement->line_text_data.textContent;
-          debug("Url to scan %s", urlToScan);
+        if (keypress == '\n'){
+          char * urlToScan;
+          //urlInput->settings_properties.focusElement->line_text_data.textContent;
+          SettingsElement * focusElement = urlInput->settings_properties.focusElement;
+          if (focusElement != NULL){
+            urlToScan = focusElement->line_text_data.textContent;
+            debug("Url to scan %s", urlToScan);
 
-          if (isFolder(urlToScan)){
-            scanAndFillDirectoryTreeView(urlToScan, treeView);
-            updateUrlInputFromTreeview(treeView, urlInput->settings_properties.focusElement);
+            if (isFolder(urlToScan)){
+              scanAndFillDirectoryTreeView(urlToScan, treeView);
+              updateUrlInputFromTreeview(treeView, urlInput->settings_properties.focusElement);
+            }
           }
+        }else{
+          insertString(extraData->lastUri, &urlInput->settings_properties.child->line_text_data.textContent);
+          int urlLength = strlen(urlInput->settings_properties.child->line_text_data.textContent);
+          urlInput->settings_properties.child->line_text_data.cursorPosition = urlLength;
         }
       }else{
         keyHandled = urlInput->onKeyPress(urlInput, keypress);
       }
-      updateComponent(urlInput, 0);
       break;
     case 2:
       // Inside viewport
+      switch (keypress){
+        case '\n':
+            //Add the STL
+            char * stlPath = ((char *) (treeView->treeview_properties.selectedElement->data));
+            if (isFolder(stlPath)){
+              break;
+            }else{
+              //It's not a folder, try to import the stl containing it
+              loadNewObject(stlPath, 0);
+            }
+            deleteBufferStackComponent(importSTLWindow);
+            focusComponent = objectManagerComponent;
+            importSTLWindow = NULL;
+            return 1;
+        case 27:
+          extraData->currentState = 0;
+          break;
+        case 'W':
+        case 'A':
+        case 'S':
+        case 'D':
+          viewportRenderer->viewport_properties.rotationPoint = (Vector3d){0, 0, 0};
+          handleViewportInput(viewportRenderer, keypress);
+          //viewportRenderer.treeVoiew:
+        }
       break;
     default:
       keyHandled = 0;
     break;
   }
+
+  switch(extraData->currentState){
+    case 0:
+      urlBox->borderColor = BORDER_COLOR;
+      treeView->parent->borderColor = BORDER_SELECTED;
+      viewport->borderColor = BORDER_COLOR;
+      insertString("hjkl) Navigate tree  l) Preview model  ESC) Cancel", &(commandHint->text_properties.content));
+      break;
+    case 1:
+      urlBox->borderColor = BORDER_SELECTED;
+      treeView->parent->borderColor = BORDER_COLOR;
+      viewport->borderColor = BORDER_COLOR;
+      insertString("ESC) Exit insertion  \u21B5) Confirm insertion", &(commandHint->text_properties.content));
+      break;
+    case 2:
+      urlBox->borderColor = BORDER_COLOR;
+      treeView->parent->borderColor = BORDER_COLOR;
+      viewport->borderColor = BORDER_SELECTED;
+      insertString("WASD) rotate view  ESC) Exit preview  \u21B5) Import model", &(commandHint->text_properties.content));
+      break;
+  }
+
+  Component * stateCmpMap[] = {treeView->parent, urlBox, viewport};
+  updateComponent(stateCmpMap[old_state], 0);
+  updateComponent(stateCmpMap[extraData->currentState], 0);
+  if(old_state != extraData->currentState)
+    updateComponent(commandHint->parent, 0);
 
   return keyHandled;
 }
@@ -1820,7 +2057,7 @@ void loadNewObject(char * uri, int format){
   debug("Loading new object: %s", uri);
   Object * createdObject;
   if(format == 0){
-    createdObject = importStl(uri, (Vector3d){1, 1, 1}, (Vector3d){0, 0, 0});
+    createdObject = importStl(uri, (Vector3d){1, 1, 1}, (Vector3d){0, 0, 0}, NULL);
     createdObject->visible = 1;
     createdObject->overlay = 0;
   }
@@ -1920,6 +2157,8 @@ void showImportSTLWindow(){
     urlTitle->startToStartOf = urlBox;
     urlTitle->marginStart = 3;
     //urlTitle->marginTop = 1;
+    //
+
 
     urlBox->children[0] = urlTitle;
     urlBox->children[1] = urlComponent;
@@ -1927,15 +2166,15 @@ void showImportSTLWindow(){
     Component * treeViewBox = newContainerCmp(actualFloatingWindow);
     treeViewBox->topToBottomOf = urlBox;
     treeViewBox->startToStartOf = actualFloatingWindow;
-    treeViewBox->bottomToBottomOf = actualFloatingWindow;
+    //treeViewBox->bottomToBottomOf= actualFloatingWindow;
     treeViewBox->endToEndOf = actualFloatingWindow;
     treeViewBox->autoHeight = 2;
-    //treeViewBox->autoWidth = 2;
     treeViewBox->autoWidth = 2;
     treeViewBox->widthBias = 0.5;
     treeViewBox->xBias = 0;
     treeViewBox->border = 1;
     treeViewBox->padding = 1;
+    treeViewBox->borderColor = BORDER_SELECTED;
 
     Component * treeView = newTreeViewComponent(treeViewBox);
     treeView->topToTopOf = treeViewBox;
@@ -1944,35 +2183,103 @@ void showImportSTLWindow(){
     treeView->endToEndOf = treeViewBox;
     treeView->autoHeight = 2;
     treeView->autoWidth = 2;
+    treeView->border = 1;
 
     treeViewBox->childCount = 1;
     treeViewBox->children = malloc(sizeof(Component *) * treeViewBox->childCount);
     treeViewBox->children[0] = treeView;
 
-    //Fill tree view
-    scanAndFillDirectoryTreeView("~", treeView);
-    updateUrlInputFromTreeview(treeView, urlInput);
     Component * viewport = newContainerCmp(actualFloatingWindow);
     viewport->endToEndOf = actualFloatingWindow;
     viewport->topToBottomOf = urlBox;
-    viewport->bottomToBottomOf = actualFloatingWindow;
+    //viewport->bottomToBottomOf = actualFloatingWindow;
     viewport->endToEndOf = actualFloatingWindow;
     viewport->startToEndOf = treeViewBox;
     viewport->autoHeight = 2;
     viewport->autoWidth = 2;
+    viewport->padding = 1;
 
-    actualFloatingWindow->childCount = 3;
+    Component * viewportPreview = newViewport(viewport);
+    viewportPreview->topToTopOf = viewport;
+    viewportPreview->bottomToBottomOf = viewport;
+    viewportPreview->startToStartOf = viewport;
+    viewportPreview->endToEndOf = viewport;
+    viewportPreview->autoHeight = 2;
+    viewportPreview->autoWidth = 2;
+    viewport->childCount = 1;
+    viewport->children = malloc(sizeof(Component *) * viewport->childCount);
+    viewport->children[0] = viewportPreview;
+    /***************Movement Axis*********************/
+    Object * object = importStl("../assets/AxisArrow.stl", (Vector3d){1, 1, 1},
+             (Vector3d){0, 0, 0}, viewportPreview->viewport_properties.vp_settings);
+    object->material->lighting = 0;
+    object->material->color = (Vector3d){0, 0, 1};
+    object->visible = 0;
+    object->overlay = 1;
+
+
+    // Comand hints
+    Component * commandHintBox = newContainerCmp(actualFloatingWindow);
+    commandHintBox->bottomToBottomOf = actualFloatingWindow;
+    commandHintBox->startToStartOf = actualFloatingWindow;
+    commandHintBox->endToEndOf = actualFloatingWindow;
+    commandHintBox->height = 1;
+    commandHintBox->autoHeight = 0;
+    commandHintBox->autoWidth = 2;
+    commandHintBox->border = 0;
+    treeViewBox->bottomToTopOf = commandHintBox;
+    viewport->bottomToTopOf = commandHintBox;
+
+    Component * commandHint = newTextComponent("hjkl) Navigate tree  l) Preview model  ESC) Cancel", commandHintBox);
+    commandHint->bottomToBottomOf = commandHintBox;
+    commandHint->startToStartOf = commandHintBox;
+    commandHint->endToEndOf = commandHintBox;
+    commandHint->topToTopOf = commandHintBox;
+    commandHint->autoHeight = 2;
+    commandHint->autoWidth = 2;
+    commandHint->border = 0;
+
+    commandHintBox->childCount = 1;
+    commandHintBox->children = malloc(sizeof(Component * ) * commandHintBox->childCount);
+    commandHintBox->children[0] = commandHint;
+
+    actualFloatingWindow->childCount = 4;
     actualFloatingWindow->children = malloc(sizeof(Component * ) * actualFloatingWindow->childCount);
     actualFloatingWindow->children[0] = urlBox;
     actualFloatingWindow->children[1] = treeViewBox;
     actualFloatingWindow->children[2] = viewport;
+    actualFloatingWindow->children[3] = commandHintBox;
 
+    //Fill tree view
+    char cwd[1024];
+
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+      printf("Current working directory: %s\n", cwd);
+      scanAndFillDirectoryTreeView(cwd, treeView);
+    } else {
+      perror("getcwd() error");
+      scanAndFillDirectoryTreeView("~", treeView);
+    }
+    updateUrlInputFromTreeview(treeView, urlInput);
+
+    Camera myCam;
+    // myCam.pos = (Vector3d){15, 0, 8};
+    // myCam.pos = (Vector3d){70, 0, 50};
+    myCam.pos = (Vector3d){50, 50, 50};
+    myCam.dir = (Vector3d){0, 0, 0};
+    myCam.fov = 45;
+    myCam.dir = normalizeVector(vect_sum((Vector3d){0, 0, 0}, myCam.pos, -1));
+    myCam.side = normalizeVector(vectProd(myCam.dir, (Vector3d){0, 0, 1}));
+    myCam.up = normalizeVector(vectProd(myCam.dir, myCam.side));
+    viewportPreview->viewport_properties.vp_settings->render_settings->active_camera =
+        myCam;
 
     floatingWindow->onKeyPress = handleImportSTLInput;
     importSTLWindow = floatingWindow;
     updateComponent(floatingWindow, 1);
   }
   floatingWindow->extraData = malloc(sizeof(ImportStlWindowData));
+  ((ImportStlWindowData *) floatingWindow->extraData)->lastUri = NULL;
   ((ImportStlWindowData *) floatingWindow->extraData)->currentState = 0;
 
   focusBuffer(floatingWindow);
@@ -2459,7 +2766,7 @@ void initUI() {
   // updateComponent(&parentComponent, 1);
   addComponentToTable(&parentComponent, &cmpsToUpdate);
 
-  createAxis();
+  createAxis(NULL);
 
   bufferStackLength = 1;
   bufferStack = malloc(sizeof(Component *) * bufferStackLength);
@@ -2473,11 +2780,15 @@ void initUI() {
 
 }
 
-void createAxis(){
+void createAxis(Viewport * viewport){
+  ViewportSettings * vp_settings = NULL;
+  if (viewport!=NULL){
+    vp_settings = viewport->vp_settings;
+  }
   Object * object;
   /***************Movement Axis*********************/
   object = importStl("../assets/AxisArrow.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->material->color = (Vector3d){0, 0, 1};
   object->visible = 0;
@@ -2485,7 +2796,7 @@ void createAxis(){
   axisObjects[0] = object;
 
   object = importStl("../assets/AxisArrow.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->rot.x = 90;
   object->material->color = (Vector3d){0, 1, 0};
@@ -2494,7 +2805,7 @@ void createAxis(){
   axisObjects[1] = object;
 
   object = importStl("../assets/AxisArrow.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->rot.y = 90;
   object->material->color = (Vector3d){1, 0, 0};
@@ -2505,7 +2816,7 @@ void createAxis(){
 
   /***************Rotation axis*********************/
   object = importStl("../assets/Rotation.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->material->color = (Vector3d){0, 0, 1};
   object->visible = 0;
@@ -2513,7 +2824,7 @@ void createAxis(){
   axisObjects[3] = object;
 
   object = importStl("../assets/Rotation.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->rot.x = 90;
   object->material->color = (Vector3d){0, 1, 0};
@@ -2522,7 +2833,7 @@ void createAxis(){
   axisObjects[4] = object;
 
   object = importStl("../assets/Rotation.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->rot.y = 90;
   object->material->color = (Vector3d){1, 0, 0};
@@ -2531,7 +2842,7 @@ void createAxis(){
   axisObjects[5] = object;
 
   object = importStl("../assets/Rotation_limit.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->material->color = (Vector3d){0, 0, 1};
   object->visible = 0;
@@ -2539,7 +2850,7 @@ void createAxis(){
   axisObjects[9] = object;
 
   object = importStl("../assets/Rotation_limit.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->rot.x = 90;
   object->material->color = (Vector3d){0, 1, 0};
@@ -2548,7 +2859,7 @@ void createAxis(){
   axisObjects[10] = object;
 
   object = importStl("../assets/Rotation_limit.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->rot.y = 90;
   object->material->color = (Vector3d){1, 0, 0};
@@ -2558,7 +2869,7 @@ void createAxis(){
 
   /***************Scale axis*********************/
   object = importStl("../assets/Scale.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->material->color = (Vector3d){0, 0, 1};
   object->visible = 0;
@@ -2566,7 +2877,7 @@ void createAxis(){
   axisObjects[6] = object;
 
   object = importStl("../assets/Scale.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->rot.x = 90;
   object->material->color = (Vector3d){0, 1, 0};
@@ -2575,7 +2886,7 @@ void createAxis(){
   axisObjects[7] = object;
 
   object = importStl("../assets/Scale.stl", (Vector3d){1, 1, 1},
-           (Vector3d){0, 0, 0});
+           (Vector3d){0, 0, 0}, vp_settings);
   object->material->lighting = 0;
   object->rot.y = 90;
   object->material->color = (Vector3d){1, 0, 0};
@@ -2890,7 +3201,7 @@ void drawContainer(Component *component, Component *parent, int forceDraw) {
       if (component->container_properties.transparent == 0){
         drawBox(component->x, component->y, component->real_height,
                 component->real_width, component->border,
-                component->backgroundColor, (Color){},
+                component->backgroundColor, component->borderColor, 
                 component);
       }
     } else if (parent != NULL) {
@@ -2899,7 +3210,7 @@ void drawContainer(Component *component, Component *parent, int forceDraw) {
       if (component->container_properties.transparent == 0){
         drawBox(component->global_x, component->global_y, component->real_height,
                 component->real_width, component->border,
-                component->backgroundColor, (Color){},
+                component->backgroundColor, component->borderColor,
                 component);
       }
     }
@@ -2934,7 +3245,7 @@ void drawBox(int x, int y, int height, int width, int drawBorder, Color bgColor,
 
   // Position cursor to start
   appendToPrintBuffer(component, "\033[%d;%dH", true_y, true_x);
-  appendToPrintBuffer(component, "\e[48;2;%d;%d;%dm", bgColor.r, bgColor.g, bgColor.b);
+  appendToPrintBuffer(component, "\e[38;2;%d;%d;%d;48;2;%d;%d;%dm", borderColor.r, borderColor.g, borderColor.b, bgColor.r, bgColor.g, bgColor.b);
   //fflush(stdout);
   for (int y_iter = true_y; y_iter <= true_end_y; y_iter++) {
     for (int x_iter = true_x; x_iter <= true_end_x; x_iter++) {
@@ -3418,7 +3729,7 @@ void drawTextComponent(Component *component, int forceDraw) {
 
 /*Function that draws the TreeView*/
 void drawTreeView(Component *component, int forceDraw) {
-  debug("\n\n*** Drawing treeViewElement at %dx %dy ***	\n", component->x,
+  debug("\n\n*** Drawing treeViewComponent at %dx %dy ***	\n", component->x,
         component->y);
   if (component->isUpdated == 0){
     if (forceDraw) printBuffer(component);
@@ -3434,6 +3745,7 @@ void drawTreeView(Component *component, int forceDraw) {
         component->parent->y);
   debug("Parent global coords: %dx %dy", component->parent->global_x,
         component->parent->global_y);
+  debug("Available size %dx, %dy", component->real_width, component->real_height);
   int maxHeight = component->global_y + component->height;
   int maxWidth = component->global_x + component->width;
 
@@ -3473,6 +3785,7 @@ void drawTreeView(Component *component, int forceDraw) {
   }
 
   /*Start drawing*/
+  debug("Start drawing element by element. Current: %d. Size: %d", component->treeview_properties.child, actualHeight);
   actualHeight = 0;
   auxOffset = 0;
   current = component->treeview_properties.child;
@@ -3482,6 +3795,8 @@ void drawTreeView(Component *component, int forceDraw) {
         //current->isUpdated = 0;
         // Set up the text element
         Component *textElement = ((Component *)current->textComponent);
+
+        debug("Drawing text element %s", textElement->text_properties.content);
         textElement->parent = component;
         textElement->isUpdated = 1;
         textElement->y = actualHeight;
@@ -3584,8 +3899,12 @@ void drawTreeView(Component *component, int forceDraw) {
 
         // Draw the text element
         drawTextComponent(textElement, 1);
+        appendToPrintBuffer(component, *textElement->printBuffer);
+
       //}
       actualHeight++;
+    }else{
+      debug("Element out of offset: %d", component->treeview_properties.offset);
     }
 
     // Get next element
@@ -3630,6 +3949,7 @@ void drawTreeView(Component *component, int forceDraw) {
 
   debug("Painting tree view component");
   printBuffer(component);
+
 
   free(stringToPrint);
 }
@@ -4485,6 +4805,7 @@ void calculateComponentDimensionsHeight(Component *component,
     if (component->bottomToBottomOf->real_height == -1) {
       calculateComponentDimensionsHeight(component->bottomToBottomOf, parent);
     }
+    debug("Parent y size: %d", component->bottomToBottomOf->real_height);
 
     int auxHeight;
     if (component->bottomToBottomOf == parent) {
@@ -4886,6 +5207,7 @@ Component *newContainer(Component * parent) {
   cont->writtenBufferSize = 0;
   cont->parent = parent;
   cont->extraData = NULL;
+  cont->borderColor = BORDER_COLOR;
 
   return cont;
 }
@@ -4907,6 +5229,7 @@ Component *newViewport(Component * parent) {
   cont->viewport_properties.vp_settings->gpu_frame_buffer = NULL;
   cont->viewport_properties.vp_settings->render_settings = NULL;
   cont->viewport_properties.vp_settings->window = NULL;
+  cont->viewport_properties.vp_settings->scene_objects = NULL;
 
   debug("Create Viewport");
   vp_create_viewport(cont->viewport_properties.vp_settings);

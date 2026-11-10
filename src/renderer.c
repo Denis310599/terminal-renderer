@@ -13,6 +13,7 @@
 #include "../include/renderer.h"
 #include "../include/cglm/cglm.h"
 
+float FLOAT_PRECISSION = 10*FLT_EPSILON;
 int SCREEN_WIDTH = 200;
 int SCREEN_HEIGHT = 50;
 int GPU_MODE = 0;
@@ -401,7 +402,13 @@ void calculateFrameGPU(ViewportSettings * viewport_settings, unsigned char * pix
 	mat4 scaleMatrix;
 	//For every object we draw it
 	ObjectListNode * current = listaObjetos;
+	if (viewport_settings->scene_objects != NULL){
+		current = viewport_settings->scene_objects;
+	}
 	while(current != NULL){
+		debug("Processing object with id %d", current->object.id);
+		debug("Visible %d", current->object.visible);
+		debug("Type %d", current->object.tipo);
 		if (current->object.visible == 0) {
 			current = current->next;
 			continue;
@@ -690,6 +697,25 @@ int loadModelGPU(Object * modelToLoad){
 //************* Object Management Functions ++++++++++++++++++++
 //********************************************************
 
+
+
+//Function that manages object adition in the scene
+Object * addObjectViewport(Object object, ViewportSettings * vp_settings){
+	debug("Adding Objects...");
+	//we get the last Id on the queue, and becouse its stored incrementally,
+	//if the Id to insert is smaller, it for sure will be inserted, otherwise not.
+	int ultimoId = vp_settings->scene_objects != NULL ? vp_settings->scene_objects->object.id : 0;
+	
+	objectListPushFirst(&vp_settings->scene_objects, object);
+	ultimoId++;
+	vp_settings->scene_objects->object.id = ultimoId;
+	debug("Added object in Viewport. Id: %d", ultimoId);
+
+	if(vp_settings->render_settings->gpu_mode==1){
+		loadModelGPU(&object);
+	}
+	return &(vp_settings->scene_objects->object);
+}
 
 //Function that manages object adition in the scene
 Object * addObject(Object object){
@@ -1010,7 +1036,7 @@ int calculaLuminosidadPixel(int x, int y, struct Camara cam, ObjectListNode ** b
 	//Calcula el punto de colision
 	struct Object objetoColisionado;
 	struct Object * ptrObjColisionado = &objetoColisionado;
-		struct Vector3d puntoColision = getPuntoColision(cam.pos, pixelGlobal, &objetoColisionado, buffer[x+SCREEN_WIDTH*y], commonObjects, 0);
+	struct Vector3d puntoColision = getPuntoColision(cam.pos, pixelGlobal, &objetoColisionado, buffer[x+SCREEN_WIDTH*y], commonObjects, 0);
 	debug("Punto colision: %f, %f, %f", puntoColision.x, puntoColision.y, puntoColision.z); 	
 	//Si no hay punto de colision no hace falta calcular el resto
 	
@@ -1651,8 +1677,7 @@ void freeLightList(LightListNode * head){
 }
 
 
-//***************************:w
-//************************************************
+//***************************************************************************
 //********** Operaciones Matematicas
 //***************************************************************************
 
@@ -1772,4 +1797,19 @@ struct Vector3d vectProjectionIntoPlane(struct Vector3d point, struct Vector3d o
 
 	ret = vect_sum(point, normalizeVector(normPlane), -d);
 	return ret;
+}
+
+int planeLineIntersectionDistance(Vector3d plane_point, Vector3d plane_norm, Vector3d line_vect, Vector3d line_point, double * result){
+	Vector3d l = normalizeVector(line_vect);
+	Vector3d n = normalizeVector(plane_norm);
+	Vector3d p0 = plane_point;
+	Vector3d l0 = line_point;
+	double l_dot_n = vect_mul(l, n);
+	if (l_dot_n < FLOAT_PRECISSION && l_dot_n > -FLOAT_PRECISSION){
+		return 1;
+	}
+	double d = vect_mul(vect_sum(p0, l0, -1.0), n)/vect_mul(l, n);
+	debug("Distancia hasta el plano: %f", d);
+	*result = d;
+	return 0;
 }

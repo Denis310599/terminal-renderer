@@ -20,7 +20,7 @@
 
 void postProcessFrameToChar(Pixel * frameBuffer, char * output);
 void printFrameGP(Pixel * buffer, unsigned char * pixel_data_in, ViewportSettings * viewport_settins);
-Object * importStl(char * path, Vector3d scale, Vector3d pos);
+Object * importStl(char * path, Vector3d scale, Vector3d pos, ViewportSettings * vp_settings);
 void encode_png(unsigned char* raw_data, int width, int height);
 char * base64_encode(const unsigned char *src, size_t len, size_t * outputLen);
 
@@ -210,7 +210,7 @@ void postProcessFrameToChar(Pixel * frameBuffer, char * output){
 }
 
 
-Object * importStl(char * path, Vector3d scale, Vector3d pos){
+Object * importStl(char * path, Vector3d scale, Vector3d pos, ViewportSettings * vp_settings){
 	debug("Importing STL: %s", path);
 	FILE * p_file;
 	unsigned char buffer[50*4];
@@ -301,7 +301,11 @@ Object * importStl(char * path, Vector3d scale, Vector3d pos){
 	meshObject.rot = (Vector3d){0, 0, 0};
 
 	free(polygonArr);
-	return addObject(meshObject);
+	if (vp_settings != NULL){
+		return addObjectViewport(meshObject, vp_settings);
+	}else{
+		return addObject(meshObject);
+	}
 	//Create the object
 	//Return the mesh
 }
