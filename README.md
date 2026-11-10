@@ -6,7 +6,7 @@ Currently it only supports CPU rendering and simple scenes, but the idea is to b
 These are some captures of what I have achived so far :D (From most recent to older)
 
 Added import STL window
-![BasicUI2](./images/import_stl.png "ImportSTL")
+![BasicUI2](./images/import-stl.png "ImportSTL")
 
 Added basic object manupulation
 ![BasicUI2](./images/simpleUI3.png "SimpleUI3")
